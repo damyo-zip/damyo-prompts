@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#fffdf8" />
+  <meta name="description" content="인스타그램에서 소개한 무료 AI 이미지 프롬프트를 한 번에 복사하세요." />
+  <title>다묘집사 프롬프트 보관함</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <p class="eyebrow">DAMYOZIPSA PROMPT ARCHIVE</p>
+      <h1>무료 프롬프트 보관함</h1>
+      <p class="intro">인스타그램에서 본 이미지를 선택하고<br>프롬프트를 한 번에 복사하세요.</p>
+    </div>
+    <a class="store-link" id="topStoreLink" href="#" target="_blank" rel="noopener">스토어 구경하기</a>
+  </header>
+
+  <main>
+    <section class="toolbar" aria-label="프롬프트 검색">
+      <input id="searchInput" type="search" placeholder="제목이나 번호로 검색" autocomplete="off" />
+      <div id="categoryFilters" class="filters" aria-label="카테고리 필터"></div>
+    </section>
+
+    <section>
+      <div id="promptGrid" class="prompt-grid" aria-live="polite"></div>
+      <p id="emptyMessage" class="empty" hidden>조건에 맞는 프롬프트가 없습니다.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>고양이와 집사를 위한 작은 아이디어를 나눕니다.</p>
+    <a id="footerStoreLink" href="#" target="_blank" rel="noopener">다묘집사 스마트스토어</a>
+  </footer>
+
+  <dialog id="promptDialog" class="prompt-dialog">
+    <button class="close-button" type="button" aria-label="닫기">×</button>
+    <img id="dialogImage" class="dialog-image" alt="" />
+    <div class="dialog-content">
+      <p id="dialogCode" class="prompt-code"></p>
+      <h2 id="dialogTitle"></h2>
+      <p id="dialogDescription" class="description"></p>
+
+      <div class="prompt-box">
+        <pre id="dialogPrompt"></pre>
+      </div>
+
+      <button id="copyButton" class="copy-button" type="button">프롬프트 전체 복사</button>
+      <p id="copyStatus" class="copy-status" aria-live="polite"></p>
+
+      <div class="usage">
+        <h3>사용 방법</h3>
+        <p>내 고양이 사진을 첨부한 뒤, 복사한 프롬프트를 이미지 생성창에 붙여넣어 사용하세요.</p>
+      </div>
+
+      <a id="dialogStoreLink" class="dialog-store-link" href="#" target="_blank" rel="noopener">
+        다묘집사 스토어 구경하기 →
+      </a>
+    </div>
+  </dialog>
+
+  <script src="prompts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
