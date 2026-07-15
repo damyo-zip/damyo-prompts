@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000" viewBox="0 0 800 1000">
+<rect width="800" height="1000" fill="#172d4a"/>
+<circle cx="400" cy="405" r="190" fill="#f2a76f" opacity=".22"/>
+<path d="M280 470 Q400 300 520 470 L495 650 Q400 710 305 650 Z" fill="#f2a76f" opacity=".88"/>
+<path d="M300 400 L335 285 L395 390 M500 400 L465 285 L405 390" fill="#f2a76f" opacity=".88"/>
+<circle cx="355" cy="490" r="13" fill="#172d4a"/><circle cx="445" cy="490" r="13" fill="#172d4a"/>
+<path d="M390 535 Q400 545 410 535" stroke="#172d4a" stroke-width="10" fill="none" stroke-linecap="round"/>
+<text x="55" y="85" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#f2a76f">P-003</text>
+<text x="55" y="920" font-family="Arial,sans-serif" font-size="34" font-weight="700" fill="#f2a76f">여름밤 고양이 산책</text>
+</svg>
