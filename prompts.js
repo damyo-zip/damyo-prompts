@@ -11,6 +11,22 @@ const SITE_CONFIG = {
 };
 
 const PROMPTS = [
+{
+    id: "P-004",
+    title: "우리냥이 관상 분석기",
+    category: "계절",
+    image: "images/p004.jpg",
+    description: "우리아이의 관상을 분석해보세요.",
+    prompt: `Please create a professional and elegant 'cat face physiognomy and charm infographic' based on the attached cat photo, composed in a 4:5 vertical portrait aspect ratio.
+*** NAME & DECORATION: Search your memory and our previous conversations/sessions to see if I have ever mentioned this attached cat's name. If you know the name, naturally incorporate it into the main title (e.g., "[Name]의 얼굴 관상") and utilize it in the hand-drawn decorative elements. If you cannot find any record of the name, safely default to '우리냥이' (Our Kitty). DO NOT invent or hallucinate a random name. ***
+A key artistic element is the perspective-correct 'artist's wireframe contour map' of the cat's face. Instead of flat crosshairs, thin white-dotted lines (horizontal and vertical curves) must follow the exact three-dimensional contours, perspective, and form of the cat's specific face to accurately map its features.
+Freely analyze the cat's physical features in the photo. Do not limit the number of phrases or points; use your own judgment to arrange the features that best match the photo. Write positive, touching, and emotionally resonant Korean handwritten-style text, appealing to the warm sensibilities of pet owners. Thin black arrows connect the text to the mapped features.
+Add delicate and refined hand-drawn decorative elements like elegant pink hearts and subtle sparkles (avoiding an overly childish look). Make excellent use of the tall 4:5 vertical space to arrange text and doodles harmoniously without feeling cluttered.
+A beautiful pink hand-drawn speech bubble at the bottom right contains a final loving conclusion with the cat's name.
+Overall warm, bright, and elegant aesthetic, like a high-end emotional infographic from a premium lifestyle magazine. The subject must be placed on a clean, solid white studio background.
+4:5 VERTICAL PORTRAIT`
+  },
+
   {
     id: "P-003",
     title: "냥다꾸",
