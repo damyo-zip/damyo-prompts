@@ -37,17 +37,36 @@
 
   <dialog id="promptDialog" class="prompt-dialog">
     <button class="close-button" type="button" aria-label="닫기">×</button>
-    <img id="dialogImage" class="dialog-image" alt="" />
+
+    <div id="carousel" class="carousel" aria-label="게시글 이미지 캐러셀">
+      <div id="carouselViewport" class="carousel-viewport">
+        <img id="dialogImage" class="dialog-image" alt="" />
+        <button id="previousSlide" class="carousel-arrow carousel-arrow--previous" type="button" aria-label="이전 이미지">‹</button>
+        <button id="nextSlide" class="carousel-arrow carousel-arrow--next" type="button" aria-label="다음 이미지">›</button>
+        <span id="carouselCounter" class="carousel-counter" aria-live="polite"></span>
+      </div>
+      <div id="carouselThumbnails" class="carousel-thumbnails" aria-label="이미지 선택"></div>
+      <div id="slideText" class="slide-text" hidden>
+        <strong id="dialogSlideTitle"></strong>
+        <p id="dialogSlideCaption"></p>
+      </div>
+    </div>
+
     <div class="dialog-content">
       <p id="dialogCode" class="prompt-code"></p>
       <h2 id="dialogTitle"></h2>
       <p id="dialogDescription" class="description"></p>
 
+      <div class="prompt-heading">
+        <h3 id="promptHeading">프롬프트</h3>
+        <span id="promptPosition"></span>
+      </div>
       <div class="prompt-box">
         <pre id="dialogPrompt"></pre>
       </div>
 
       <button id="copyButton" class="copy-button" type="button">프롬프트 전체 복사</button>
+      <button id="copySeriesButton" class="copy-button secondary-copy-button" type="button" hidden>시리즈 프롬프트 모두 복사</button>
       <p id="copyStatus" class="copy-status" aria-live="polite"></p>
 
       <div class="usage">

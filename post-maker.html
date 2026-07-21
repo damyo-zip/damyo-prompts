@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#fffdf8" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>다묘집사 게시글 등록기</title>
+  <link rel="stylesheet" href="post-maker.css" />
+</head>
+<body>
+  <main class="maker-shell">
+    <header class="maker-header">
+      <div>
+        <p class="eyebrow">LOCAL POST MAKER</p>
+        <h1>게시글 등록기</h1>
+        <p class="intro">여러 이미지와 프롬프트를 입력한 뒤 버튼 한 번으로 사이트 폴더에 저장합니다.</p>
+      </div>
+      <a href="index.html" target="_blank" rel="noopener">사이트 미리보기 ↗</a>
+    </header>
+
+    <section class="notice">
+      <strong>사용 순서</strong>
+      <p>① 사이트 폴더 선택 → ② 내용 입력 → ③ 이미지 추가 → ④ 게시글 저장 → ⑤ GitHub Desktop에서 Commit &amp; Push</p>
+    </section>
+
+    <section class="panel folder-panel">
+      <div>
+        <h2>1. 사이트 폴더 연결</h2>
+        <p id="folderStatus">아직 폴더를 선택하지 않았습니다.</p>
+      </div>
+      <button id="pickFolderButton" class="button primary" type="button">사이트 폴더 선택</button>
+    </section>
+
+    <form id="postForm" novalidate>
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>2. 게시글 정보</h2>
+            <p>게시글 전체에 공통으로 표시될 내용입니다.</p>
+          </div>
+          <span id="nextIdBadge" class="id-badge"></span>
+        </div>
+
+        <div class="form-grid">
+          <label>
+            <span>게시글 제목 *</span>
+            <input id="titleInput" name="title" required placeholder="예: 여름휴가 고양이 시리즈" />
+          </label>
+
+          <label>
+            <span>카테고리 *</span>
+            <input id="categoryInput" name="category" required list="categoryOptions" placeholder="예: 계절" />
+            <datalist id="categoryOptions"></datalist>
+          </label>
+        </div>
+
+        <label>
+          <span>간단한 소개</span>
+          <input id="descriptionInput" name="description" placeholder="예: 우리 고양이 사진을 넣어주세요." />
+        </label>
+
+        <label>
+          <span>모든 이미지에 공통으로 붙일 프롬프트</span>
+          <textarea id="commonPromptInput" name="commonPrompt" rows="8" placeholder="이미지마다 프롬프트가 완전히 다르면 비워두어도 됩니다."></textarea>
+          <small>공통 프롬프트와 장면별 프롬프트가 모두 있으면 사이트에서 자동으로 합쳐서 복사합니다.</small>
+        </label>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading image-heading">
+          <div>
+            <h2>3. 이미지와 장면별 프롬프트</h2>
+            <p>한 장만 넣으면 일반 게시글, 여러 장을 넣으면 캐러셀 게시글이 됩니다.</p>
+          </div>
+          <label class="button secondary file-button">
+            이미지 추가
+            <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp,image/avif" multiple hidden />
+          </label>
+        </div>
+
+        <div id="dropZone" class="drop-zone" tabindex="0">
+          <strong>이미지를 여기로 끌어오거나 클릭하세요.</strong>
+          <span>여러 장을 한 번에 선택할 수 있습니다.</span>
+        </div>
+
+        <div id="imageList" class="image-list"></div>
+        <p id="imageEmpty" class="image-empty">아직 선택한 이미지가 없습니다.</p>
+      </section>
+
+      <section class="panel save-panel">
+        <div>
+          <h2>4. 저장</h2>
+          <p>이미지는 자동으로 이름을 정리해 <code>images</code> 폴더에 넣고, <code>prompts.js</code>도 갱신합니다.</p>
+        </div>
+        <div class="save-actions">
+          <button id="saveButton" class="button primary large" type="submit">게시글 저장</button>
+          <button id="downloadButton" class="button secondary" type="button">수동 저장 파일 받기</button>
+        </div>
+        <p id="saveStatus" class="save-status" aria-live="polite"></p>
+      </section>
+    </form>
+
+    <section class="panel help-panel">
+      <details>
+        <summary>직접 저장 버튼이 작동하지 않을 때</summary>
+        <p>Chrome 또는 Edge에서 이 파일을 여세요. 그래도 폴더 선택 기능이 없으면 ‘수동 저장 파일 받기’를 눌러 내려받은 <code>prompts.js</code>는 사이트 최상단에, 이미지 파일은 <code>images</code> 폴더에 넣으세요.</p>
+      </details>
+    </section>
+  </main>
+
+  <template id="imageCardTemplate">
+    <article class="image-card" draggable="true">
+      <div class="image-preview-wrap">
+        <img class="image-preview" alt="" />
+        <span class="image-order"></span>
+      </div>
+      <div class="image-fields">
+        <div class="image-card-topline">
+          <strong class="image-file-name"></strong>
+          <div class="image-actions">
+            <button class="icon-button move-up" type="button" aria-label="앞으로 이동">↑</button>
+            <button class="icon-button move-down" type="button" aria-label="뒤로 이동">↓</button>
+            <button class="icon-button remove-image" type="button" aria-label="이미지 삭제">×</button>
+          </div>
+        </div>
+        <label>
+          <span>장면 제목</span>
+          <input class="scene-title" placeholder="예: 바닷가 라탄 바구니" />
+        </label>
+        <label>
+          <span>짧은 설명</span>
+          <input class="scene-caption" placeholder="이미지 아래에 표시되는 설명" />
+        </label>
+        <label>
+          <span>이 이미지의 프롬프트</span>
+          <textarea class="scene-prompt" rows="7" placeholder="이 장면에만 해당하는 프롬프트"></textarea>
+        </label>
+      </div>
+    </article>
+  </template>
+
+  <script src="prompts.js"></script>
+  <script src="post-maker.js"></script>
+</body>
+</html>

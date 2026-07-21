@@ -21,7 +21,8 @@ body {
   line-height: 1.55;
 }
 
-button, input { font: inherit; }
+button, input, textarea { font: inherit; }
+button:disabled { cursor: not-allowed; opacity: .48; }
 
 .site-header, main, footer {
   width: min(100% - 32px, 840px);
@@ -128,6 +129,11 @@ h1 {
   min-width: 0;
 }
 
+.card-image-wrap {
+  position: relative;
+  display: block;
+}
+
 .prompt-card img {
   display: block;
   width: 100%;
@@ -140,7 +146,26 @@ h1 {
 
 .prompt-card:hover img { transform: translateY(-3px); }
 
-.card-meta { padding: 10px 4px 2px; }
+.multi-image-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 42px;
+  justify-content: center;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: rgba(25, 23, 20, .78);
+  color: white;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .18);
+  backdrop-filter: blur(7px);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.card-meta { display: block; padding: 10px 4px 2px; }
 
 .card-code {
   display: block;
@@ -194,15 +219,25 @@ footer p { margin: 0 0 8px; }
   position: sticky;
   float: right;
   top: 12px;
-  z-index: 3;
+  z-index: 6;
   margin: 12px 12px -54px 0;
   width: 42px;
   height: 42px;
   border: 0;
   border-radius: 50%;
-  background: rgba(255,255,255,.9);
+  background: rgba(255,255,255,.92);
+  box-shadow: 0 3px 16px rgba(0,0,0,.14);
   font-size: 27px;
   cursor: pointer;
+}
+
+.carousel { background: var(--card); }
+
+.carousel-viewport {
+  position: relative;
+  overflow: hidden;
+  background: var(--soft);
+  touch-action: pan-y;
 }
 
 .dialog-image {
@@ -211,6 +246,88 @@ footer p { margin: 0 0 8px; }
   aspect-ratio: 4 / 5;
   object-fit: cover;
   background: var(--soft);
+}
+
+.carousel-arrow {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 42px;
+  height: 42px;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255,255,255,.88);
+  color: var(--text);
+  box-shadow: 0 5px 20px rgba(0,0,0,.16);
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.carousel-arrow--previous { left: 12px; }
+.carousel-arrow--next { right: 12px; }
+
+.carousel-counter {
+  position: absolute;
+  right: 14px;
+  bottom: 13px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(25,23,20,.72);
+  color: white;
+  font-size: 12px;
+  font-weight: 800;
+  backdrop-filter: blur(6px);
+}
+
+.carousel-thumbnails {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 10px 12px 2px;
+  scrollbar-width: none;
+}
+
+.carousel-thumbnails::-webkit-scrollbar { display: none; }
+
+.carousel-thumbnail {
+  flex: 0 0 58px;
+  width: 58px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  opacity: .58;
+  cursor: pointer;
+}
+
+.carousel-thumbnail.active {
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+.carousel-thumbnail img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.slide-text {
+  padding: 12px 20px 2px;
+}
+
+.slide-text strong {
+  display: block;
+  font-size: 15px;
+}
+
+.slide-text p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .dialog-content { padding: 24px; }
@@ -227,11 +344,30 @@ footer p { margin: 0 0 8px; }
   color: var(--muted);
 }
 
+.prompt-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.prompt-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.prompt-heading span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .prompt-box {
   border: 1px solid var(--line);
   border-radius: 16px;
   background: #faf8f3;
-  max-height: 260px;
+  max-height: 300px;
   overflow: auto;
 }
 
@@ -256,7 +392,14 @@ footer p { margin: 0 0 8px; }
   cursor: pointer;
 }
 
-.copy-button.copied { background: #287a4c; }
+.secondary-copy-button {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--text);
+}
+
+.copy-button.copied { background: #287a4c; color: white; }
 
 .copy-status {
   min-height: 24px;
@@ -291,5 +434,8 @@ footer p { margin: 0 0 8px; }
   .store-link { display: none; }
   .prompt-grid { gap: 10px; }
   .prompt-card img { border-radius: 15px; }
+  .multi-image-badge { top: 8px; right: 8px; }
   .dialog-content { padding: 20px; }
+  .carousel-arrow { width: 38px; height: 38px; }
+  .carousel-thumbnail { flex-basis: 50px; width: 50px; }
 }
