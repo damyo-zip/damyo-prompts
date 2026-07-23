@@ -138,7 +138,7 @@ function renderThumbnails() {
   previousSlideButton.hidden = !isSeries;
   nextSlideButton.hidden = !isSeries;
   carouselCounter.hidden = !isSeries;
-  copySeriesButton.hidden = !isSeries;
+  copySeriesButton.hidden = true;
 
   if (!isSeries) return;
 
