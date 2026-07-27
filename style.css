@@ -235,6 +235,8 @@ footer p { margin: 0 0 8px; }
 
 .carousel-viewport {
   position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 5;
   overflow: hidden;
   background: var(--soft);
   touch-action: pan-y;
@@ -243,8 +245,8 @@ footer p { margin: 0 0 8px; }
 .dialog-image {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 5;
-  object-fit: cover;
+  height: 100%;
+  object-fit: contain;
   background: var(--soft);
 }
 
