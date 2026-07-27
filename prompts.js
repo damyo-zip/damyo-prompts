@@ -14,7 +14,7 @@ const PROMPTS = [
     "title": "여름 휴가 냥모티콘 시리즈",
     "category": "계절",
     "cover": "images/p023-01.png",
-    "description": "우리 고양이 사진을 넣어주세요",
+    "description": "이미지마다 프롬프트가 달라요",
     "images": [
       {
         "src": "images/p023-01.png",
@@ -59,7 +59,7 @@ const PROMPTS = [
     "title": "고양이 체중계",
     "category": "귀여운 이미지",
     "cover": "images/p022-01.png",
-    "description": "우리 고양이 사진을 넣어주세요",
+    "description": "이미지마다 프롬프트가 달라요",
     "images": [
       {
         "src": "images/p022-01.png",
