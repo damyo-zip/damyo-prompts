@@ -26,6 +26,8 @@ let currentSlides = [];
 let currentSlideIndex = 0;
 let touchStartX = null;
 
+const PINNED_PROMPT_ID = "P-023";
+
 for (const id of ["topStoreLink", "footerStoreLink", "dialogStoreLink"]) {
   document.getElementById(id).href = SITE_CONFIG.storeUrl;
 }
@@ -90,6 +92,12 @@ function renderCards() {
     ].join(" ").toLowerCase();
     return categoryMatch && searchableText.includes(query);
   });
+
+  visible.sort((a, b) => {
+  if (a.id === PINNED_PROMPT_ID) return -1;
+  if (b.id === PINNED_PROMPT_ID) return 1;
+  return 0;
+});
 
   grid.innerHTML = "";
   emptyMessage.hidden = visible.length > 0;
