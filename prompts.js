@@ -4,7 +4,7 @@
 */
 
 const SITE_CONFIG = {
-  "storeUrl": "https://naver.me/xCj0R3nr",
+  "storeUrl": "https://chatgpt.com/",
   "instagramUrl": "https://instagram.com/damyo_zip/"
 };
 
