@@ -531,3 +531,8 @@ footer p { margin: 0 0 8px; }
   .toolbar { top: 57px; }
   .pinned-badge { top: 8px; left: 8px; }
 }
+
+/* 동물별 전용 링크에서는 동물 탭이 숨겨지므로 검색 영역을 화면 맨 위에 붙입니다. */
+.animal-tabs[hidden] + .toolbar {
+  top: 0;
+}
