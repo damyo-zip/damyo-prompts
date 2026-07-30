@@ -432,8 +432,14 @@ footer p { margin: 0 0 8px; }
 }
 
 @media (max-width: 560px) {
-  .site-header { align-items: flex-start; flex-direction: column; padding-top: 38px; }
+  .site-header {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-top: 38px;
+    padding-bottom: 4px;
+  }
   .store-link { display: none; }
+  .toolbar { padding-top: 6px; }
   .prompt-grid { gap: 10px; }
   .prompt-card img { border-radius: 15px; }
   .multi-image-badge { top: 8px; right: 8px; }
