@@ -1,40 +1,131 @@
-# 다묘집사 프롬프트 보관함
+# 반려동물 프롬프트 통합 보관함
 
-인스타그램 프로필 링크에서 사용하는 정적 웹사이트입니다.
+고양이·강아지·햄스터/소동물 인스타그램 계정에서 함께 사용하는 정적 웹사이트입니다. 사이트와 게시글 등록기는 하나만 관리하고, 주소의 `animal` 값에 따라 해당 동물 프롬프트만 보여줍니다.
 
-이번 버전부터 다음 기능을 지원합니다.
+## 동물별 전용 주소
 
-- 게시글 한 개에 이미지 여러 장 등록
-- 상세화면 이미지 캐러셀, 썸네일, 좌우 스와이프
-- 이미지마다 서로 다른 장면별 프롬프트 등록
-- 공통 프롬프트 + 장면별 프롬프트 자동 결합
-- 현재 이미지 프롬프트 복사
-- 시리즈 전체 프롬프트 한 번에 복사
-- 로컬 게시글 등록기로 이미지 저장과 `prompts.js` 수정 자동화
-- 기존 `image` 형식 게시글과 새 `images` 형식 게시글 동시 지원
+같은 사이트 주소 뒤에 다음 값을 붙여 각 인스타그램 프로필에 연결하세요.
 
-## 가장 쉬운 게시글 등록 방법
+```text
+고양이: index.html?animal=cat
+강아지: index.html?animal=dog
+햄스터·소동물: index.html?animal=small
+```
+
+GitHub Pages 실제 주소가 `https://example.github.io/prompts/`라면 다음처럼 사용합니다.
+
+```text
+https://example.github.io/prompts/?animal=cat
+https://example.github.io/prompts/?animal=dog
+https://example.github.io/prompts/?animal=small
+```
+
+동물별 전용 주소로 들어온 방문자에게는 해당 동물의 게시물만 보이며, 다른 동물 탭은 표시되지 않습니다. 파라미터가 없는 기본 주소로 접속했을 때만 운영 확인용으로 세 동물 탭이 모두 표시됩니다.
+
+## 주요 기능
+
+- 기존 고양이 게시글 21개 보존
+- 동물별 인스타 전용 링크에서는 다른 동물 탭 자동 숨김
+- 파라미터 없는 기본 주소에서는 세 동물 탭 통합 확인
+- 동물별 카테고리와 검색 결과 분리
+- 동물별 전용 주소 지원
+- 동물별 제목·소개·사용법·푸터 문구 자동 변경
+- 동물별 선택적 제휴 상품 링크 설정
+- 게시글 상단 고정 기능
+- 단일 이미지와 캐러셀 게시글 지원
+- 이미지별 장면 프롬프트 및 공통 프롬프트 지원
+- 로컬 등록기에서 동물 종류를 선택해 바로 저장
+
+## 게시글 등록 방법
 
 Chrome 또는 Edge에서 사이트 폴더 안의 `post-maker.html`을 엽니다.
 
 1. **사이트 폴더 선택**을 누릅니다.
 2. `index.html`, `prompts.js`, `images` 폴더가 있는 최상위 폴더를 선택합니다.
-3. 제목, 카테고리, 소개와 공통 프롬프트를 입력합니다.
-4. 이미지 한 장 또는 여러 장을 추가합니다.
-5. 각 이미지에 장면 제목, 설명, 장면별 프롬프트를 입력합니다.
-6. 화살표 또는 드래그로 이미지 순서를 정합니다.
+3. 고양이·강아지·햄스터/소동물 중 하나를 선택합니다.
+4. 제목, 카테고리, 소개와 프롬프트를 입력합니다.
+5. 이미지 한 장 또는 여러 장을 추가합니다.
+6. 필요한 경우 **이 동물 탭의 맨 위에 고정**을 체크합니다.
 7. **게시글 저장**을 누릅니다.
 8. GitHub Desktop에서 변경사항을 확인하고 Commit → Push 합니다.
 
-게시글 번호는 기존 마지막 번호 다음으로 자동 생성됩니다. 예를 들어 현재 마지막 게시글이 `P-018`이면 새 게시글은 `P-019`가 됩니다.
-
-이미지 파일명도 자동으로 다음처럼 정리됩니다.
+동물을 바꾸면 해당 동물에서 사용한 카테고리만 자동완성 목록에 표시됩니다. 게시글 번호는 세 계정 전체에서 공통으로 증가하므로 이미지 파일명이 겹치지 않습니다.
 
 ```text
-images/p019-01.jpg
-images/p019-02.jpg
-images/p019-03.jpg
+P-025 → images/p025-01.jpg
+P-026 → images/p026-01.jpg
 ```
+
+## 게시글 데이터 형식
+
+등록기가 자동 생성하므로 직접 작성할 필요는 없습니다.
+
+```js
+{
+  id: "P-025",
+  animal: "dog",
+  pinned: false,
+  title: "손가락 끝 요정견",
+  category: "귀여운 이미지",
+  cover: "images/p025-01.jpg",
+  description: "만들 때마다 다른 코스튬",
+  prompt: "모든 이미지에 공통으로 적용할 프롬프트",
+  images: [
+    {
+      src: "images/p025-01.jpg",
+      title: "벌 코스튬",
+      caption: "손가락 끝에 앉은 작은 강아지",
+      prompt: "이 장면에만 적용할 프롬프트"
+    }
+  ]
+}
+```
+
+`animal` 값은 다음 셋 중 하나입니다.
+
+```text
+cat   고양이
+dog   강아지
+small 햄스터·소동물
+```
+
+기존 단일 이미지 형식도 계속 지원합니다.
+
+## 동물별 문구와 링크 설정
+
+`prompts.js` 맨 위의 `SITE_CONFIG.animals`에서 수정합니다.
+
+```js
+const SITE_CONFIG = {
+  defaultAnimal: "cat",
+  animals: {
+    cat: {
+      label: "고양이",
+      title: "고양이 무료 프롬프트",
+      instagramUrl: "https://instagram.com/고양이계정",
+      chatgptUrl: "https://chatgpt.com/download/",
+      affiliateUrl: "제휴 상품 링크",
+      affiliateLabel: "고양이 굿즈 보러가기"
+    },
+    dog: {
+      label: "강아지",
+      instagramUrl: "https://instagram.com/강아지계정",
+      chatgptUrl: "https://chatgpt.com/download/",
+      affiliateUrl: "강아지용 제휴 상품 링크",
+      affiliateLabel: "강아지 굿즈 보러가기"
+    },
+    small: {
+      label: "햄스터·소동물",
+      instagramUrl: "https://instagram.com/소동물계정",
+      chatgptUrl: "https://chatgpt.com/download/",
+      affiliateUrl: "소동물용 제휴 상품 링크",
+      affiliateLabel: "소동물 굿즈 보러가기"
+    }
+  }
+};
+```
+
+`affiliateUrl`이 비어 있으면 공개 상세화면에서 제휴 버튼은 자동으로 숨겨집니다.
 
 ## 직접 저장이 작동하지 않을 때
 
@@ -44,87 +135,27 @@ images/p019-03.jpg
 - 함께 내려받은 이미지들은 `images` 폴더에 넣습니다.
 - 브라우저가 여러 파일 다운로드 허용 여부를 물으면 허용합니다.
 
-## 새 캐러셀 데이터 형식
-
-등록기가 자동으로 생성하므로 직접 작성할 필요는 없습니다.
-
-```js
-{
-  id: "P-019",
-  title: "여름휴가 고양이 시리즈",
-  category: "계절",
-  cover: "images/p019-01.jpg",
-  description: "우리 고양이 사진을 넣어주세요.",
-  prompt: "모든 이미지에 공통으로 적용할 프롬프트",
-  images: [
-    {
-      src: "images/p019-01.jpg",
-      title: "바닷가 피서",
-      caption: "라탄 바구니에서 얼굴만 빼꼼 내민 고양이",
-      prompt: "첫 번째 장면에만 적용할 프롬프트"
-    },
-    {
-      src: "images/p019-02.jpg",
-      title: "계곡 피서",
-      caption: "차가운 계곡물에 앞발을 담근 고양이",
-      prompt: "두 번째 장면에만 적용할 프롬프트"
-    }
-  ]
-}
-```
-
-공통 프롬프트가 필요 없으면 비워둘 수 있습니다. 반대로 모든 이미지가 동일한 프롬프트를 사용한다면 장면별 프롬프트를 비우고 공통 프롬프트만 입력해도 됩니다.
-
-## 기존 게시글 호환
-
-기존 형식은 수정하지 않아도 그대로 작동합니다.
-
-```js
-{
-  id: "P-018",
-  title: "꽃화보냥이",
-  category: "계절",
-  image: "images/p018.jpg",
-  description: "우리 고양이 사진을 넣어주세요.",
-  prompt: "기존 프롬프트"
-}
-```
-
-## 사이트 주소 설정
-
-`prompts.js`의 아래 값을 실제 주소로 유지합니다.
-
-```js
-const SITE_CONFIG = {
-  storeUrl: "https://smartstore.naver.com/실제주소",
-  instagramUrl: "https://instagram.com/실제아이디"
-};
-```
-
-등록기는 선택한 사이트 폴더의 `SITE_CONFIG`를 읽어서 그대로 보존합니다.
-
 ## GitHub Pages 배포
 
-1. GitHub에서 Public repository를 준비합니다.
-2. 이 폴더 안의 파일을 repository 최상단에 둡니다.
-3. repository의 `Settings` → `Pages`로 이동합니다.
-4. `Build and deployment`의 Source를 `Deploy from a branch`로 선택합니다.
-5. Branch는 `main`, 폴더는 `/(root)`를 고르고 Save를 누릅니다.
-6. GitHub Desktop에서 변경사항을 Push하면 사이트가 갱신됩니다.
+1. 수정된 파일을 현재 저장소에 덮어씁니다.
+2. GitHub Desktop에서 변경사항을 확인합니다.
+3. Commit 후 Push합니다.
+4. 각 인스타 프로필에는 위의 동물별 전용 주소를 입력합니다.
 
 ## 파일 구성
 
 - `index.html`: 공개 페이지 구조
-- `style.css`: 공개 페이지 디자인과 캐러셀 스타일
-- `app.js`: 검색, 필터, 캐러셀, 프롬프트 복사 기능
-- `prompts.js`: 실제 게시글 데이터와 스토어 주소
-- `post-maker.html`: 로컬 게시글 등록 화면
+- `style.css`: 공개 페이지 디자인
+- `app.js`: 동물/카테고리 필터, 캐러셀, 복사 기능
+- `prompts.js`: 사이트 설정과 모든 동물 게시글 데이터
+- `post-maker.html`: 통합 게시글 등록 화면
 - `post-maker.css`: 등록기 디자인
 - `post-maker.js`: 이미지 저장과 `prompts.js` 자동 갱신
-- `images/`: 게시글 이미지
+- `images/`: 모든 동물 게시글 이미지
 
 ## 주의
 
-- `post-maker.html`은 사이트 방문자를 위한 페이지가 아니라 운영자용 등록기입니다.
-- 폴더 직접 저장 기능은 Chrome 또는 Edge에서 사용하는 것이 가장 안정적입니다.
-- 클립보드 복사 기능은 HTTPS인 GitHub Pages에서 가장 안정적으로 작동합니다.
+- `post-maker.html`은 방문자용이 아니라 운영자용입니다.
+- 폴더 직접 저장 기능은 Chrome 또는 Edge에서 가장 안정적입니다.
+- 공개 사이트의 클립보드 복사는 HTTPS인 GitHub Pages에서 가장 안정적으로 작동합니다.
+- 강아지와 소동물 탭은 현재 게시글이 0개이므로, 등록기에서 각각 첫 게시물을 추가하면 바로 표시됩니다.

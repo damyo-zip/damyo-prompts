@@ -1,6 +1,7 @@
 const form = document.querySelector("#postForm");
 const pickFolderButton = document.querySelector("#pickFolderButton");
 const folderStatus = document.querySelector("#folderStatus");
+const animalInput = document.querySelector("#animalInput");
 const titleInput = document.querySelector("#titleInput");
 const categoryInput = document.querySelector("#categoryInput");
 const descriptionInput = document.querySelector("#descriptionInput");
@@ -15,6 +16,8 @@ const categoryOptions = document.querySelector("#categoryOptions");
 const saveButton = document.querySelector("#saveButton");
 const downloadButton = document.querySelector("#downloadButton");
 const saveStatus = document.querySelector("#saveStatus");
+const pinnedInput = document.querySelector("#pinnedInput");
+const previewLink = document.querySelector("#previewLink");
 
 let projectDirectoryHandle = null;
 let imageItems = [];
@@ -25,6 +28,7 @@ let workingSiteConfig = structuredCloneSafe(SITE_CONFIG);
 initialize();
 
 function initialize() {
+  updateAnimalFormHints();
   renderCategoryOptions();
   updateNextId();
   updateImageList();
@@ -40,9 +44,44 @@ function structuredCloneSafe(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function getAnimalKey(item) {
+  return ["cat", "dog", "small"].includes(item?.animal) ? item.animal : "cat";
+}
+
 function renderCategoryOptions() {
-  const categories = [...new Set(workingPrompts.map(item => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
+  const selectedAnimal = animalInput.value || "cat";
+  const categories = [...new Set(
+    workingPrompts
+      .filter(item => getAnimalKey(item) === selectedAnimal)
+      .map(item => item.category)
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, "ko"));
   categoryOptions.innerHTML = categories.map(category => `<option value="${escapeAttribute(category)}"></option>`).join("");
+  updatePreviewLink();
+}
+
+function updatePreviewLink() {
+  previewLink.href = `index.html?animal=${encodeURIComponent(animalInput.value || "cat")}`;
+}
+
+function updateAnimalFormHints() {
+  const hints = {
+    cat: {
+      title: "예: 여름휴가 고양이 시리즈",
+      description: "예: 우리 고양이 사진을 넣어주세요."
+    },
+    dog: {
+      title: "예: 손가락 끝 요정견",
+      description: "예: 우리 강아지 사진을 넣어주세요."
+    },
+    small: {
+      title: "예: 햄스터 미니 코스튬",
+      description: "예: 우리 햄스터나 소동물 사진을 넣어주세요."
+    }
+  };
+  const current = hints[animalInput.value] || hints.cat;
+  titleInput.placeholder = current.title;
+  descriptionInput.placeholder = current.description;
 }
 
 function getNextId() {
@@ -64,7 +103,8 @@ async function chooseProjectFolder() {
     await verifyProjectFolder(handle);
     await loadProjectData(handle);
     projectDirectoryHandle = handle;
-    folderStatus.textContent = `연결됨: ${handle.name} · 게시글 ${workingPrompts.length}개` ;
+    const counts = ["cat", "dog", "small"].map(key => workingPrompts.filter(item => getAnimalKey(item) === key).length);
+    folderStatus.textContent = `연결됨: ${handle.name} · 고양이 ${counts[0]} · 강아지 ${counts[1]} · 소동물 ${counts[2]}`;
     renderCategoryOptions();
     updateNextId();
     pickFolderButton.textContent = "다른 폴더 선택";
@@ -194,6 +234,7 @@ function removeItem(id) {
 }
 
 function validatePost() {
+  if (!["cat", "dog", "small"].includes(animalInput.value)) throw new Error("동물 종류를 선택해 주세요.");
   if (!titleInput.value.trim()) throw new Error("게시글 제목을 입력해 주세요.");
   if (!categoryInput.value.trim()) throw new Error("카테고리를 입력해 주세요.");
   if (!imageItems.length) throw new Error("이미지를 한 장 이상 추가해 주세요.");
@@ -219,6 +260,8 @@ function createPostData() {
 
   return removeEmptyValues({
     id,
+    animal: animalInput.value,
+    pinned: pinnedInput.checked || undefined,
     title: titleInput.value.trim(),
     category: categoryInput.value.trim(),
     cover: images[0].src,
@@ -292,11 +335,13 @@ async function writePromptsFile(directoryHandle, prompts) {
 }
 
 function serializePromptsFile(prompts) {
-  return `/*\n게시글은 post-maker.html에서 추가하는 것을 권장합니다.\n기존 단일 이미지 형식(image)과 새 캐러셀 형식(images)을 모두 지원합니다.\n*/\n\nconst SITE_CONFIG = ${JSON.stringify(workingSiteConfig, null, 2)};\n\nconst PROMPTS = ${JSON.stringify(prompts, null, 2)};\n`;
+  return `/*\n게시글은 post-maker.html에서 추가하는 것을 권장합니다.\nanimal 값은 cat, dog, small 중 하나입니다. 기존 단일 이미지 형식(image)과 캐러셀 형식(images)을 모두 지원합니다.\n*/\n\nconst SITE_CONFIG = ${JSON.stringify(workingSiteConfig, null, 2)};\n\nconst PROMPTS = ${JSON.stringify(prompts, null, 2)};\n`;
 }
 
 function resetFormAfterSave() {
+  const savedAnimal = animalInput.value;
   form.reset();
+  animalInput.value = savedAnimal;
   imageItems.forEach(item => URL.revokeObjectURL(item.previewUrl));
   imageItems = [];
   updateImageList();
@@ -351,6 +396,11 @@ function escapeAttribute(value) {
 }
 
 pickFolderButton.addEventListener("click", chooseProjectFolder);
+animalInput.addEventListener("change", () => {
+  categoryInput.value = "";
+  updateAnimalFormHints();
+  renderCategoryOptions();
+});
 imageInput.addEventListener("change", event => addFiles(event.target.files));
 form.addEventListener("submit", savePost);
 downloadButton.addEventListener("click", downloadManualFiles);
