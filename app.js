@@ -71,6 +71,51 @@ let currentSlides = [];
 let currentSlideIndex = 0;
 let touchStartX = null;
 
+function trackAnalyticsEvent(eventName, parameters = {}) {
+  if (typeof window.trackEvent === "function") {
+    window.trackEvent(eventName, parameters);
+  }
+}
+
+function getArchiveAnalyticsParameters(source = "initial") {
+  return {
+    animal: selectedAnimal,
+    animal_label: getAnimalConfig().label || selectedAnimal,
+    access_mode: lockedAnimal ? "animal_link" : "combined_archive",
+    archive_source: source
+  };
+}
+
+function getPromptAnalyticsParameters(item = currentPrompt) {
+  if (!item) return {};
+  return {
+    prompt_id: String(item.id || ""),
+    prompt_title: String(item.title || ""),
+    animal: getAnimalKey(item),
+    category: String(item.category || ""),
+    slide_count: normalizeSlides(item).length
+  };
+}
+
+function trackInitialPageView() {
+  trackAnalyticsEvent("page_view", {
+    page_title: document.title,
+    page_location: location.href,
+    page_path: `${location.pathname}${location.search}`,
+    ...getArchiveAnalyticsParameters("initial")
+  });
+
+  trackAnalyticsEvent("archive_view", getArchiveAnalyticsParameters("initial"));
+}
+
+function trackCopyEvent(copyScope) {
+  trackAnalyticsEvent("copy_prompt", {
+    ...getPromptAnalyticsParameters(),
+    copy_scope: copyScope,
+    slide_number: currentSlides.length ? currentSlideIndex + 1 : 1
+  });
+}
+
 function getAnimalKey(item) {
   return animalKeys.includes(item?.animal) ? item.animal : "cat";
 }
@@ -176,6 +221,7 @@ function selectAnimal(key) {
   renderCategoryFilters();
   renderCards();
   updateListUrl();
+  trackAnalyticsEvent("archive_view", getArchiveAnalyticsParameters("animal_tab"));
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -236,12 +282,12 @@ function renderCards() {
         <span class="card-title">${escapeHtml(item.title)}</span>
       </span>
     `;
-    card.addEventListener("click", () => openPrompt(item));
+    card.addEventListener("click", () => openPrompt(item, 0, "card"));
     grid.appendChild(card);
   });
 }
 
-function openPrompt(item, requestedSlide = 0) {
+function openPrompt(item, requestedSlide = 0, openSource = "card") {
   const animalKey = getAnimalKey(item);
   if (lockedAnimal && animalKey !== lockedAnimal) {
     updateListUrl();
@@ -272,6 +318,11 @@ function openPrompt(item, requestedSlide = 0) {
 
   if (!dialog.open) dialog.showModal();
   updatePromptUrl();
+  trackAnalyticsEvent("view_prompt", {
+    ...getPromptAnalyticsParameters(item),
+    open_source: openSource,
+    first_slide_number: currentSlideIndex + 1
+  });
 }
 
 function renderThumbnails() {
@@ -396,17 +447,17 @@ function closePrompt(options = {}) {
   if (!options.preserveAnimal) updateListUrl();
 }
 
-async function copyText(text, button, successMessage) {
+async function copyText(text, button, successMessage, copyScope) {
   if (!text) return;
   try {
     await navigator.clipboard.writeText(text);
-    markCopied(button, successMessage);
+    markCopied(button, successMessage, copyScope);
   } catch (error) {
-    fallbackCopy(text, button, successMessage);
+    fallbackCopy(text, button, successMessage, copyScope);
   }
 }
 
-function fallbackCopy(text, button, successMessage) {
+function fallbackCopy(text, button, successMessage, copyScope) {
   const area = document.createElement("textarea");
   area.value = text;
   area.style.position = "fixed";
@@ -416,19 +467,20 @@ function fallbackCopy(text, button, successMessage) {
   area.select();
   try {
     document.execCommand("copy");
-    markCopied(button, successMessage);
+    markCopied(button, successMessage, copyScope);
   } catch {
     copyStatus.textContent = "복사에 실패했습니다. 프롬프트를 길게 눌러 복사해 주세요.";
   }
   area.remove();
 }
 
-function markCopied(button, successMessage) {
+function markCopied(button, successMessage, copyScope) {
   resetCopyButtons();
   button.textContent = "복사 완료 ✓";
   button.classList.add("copied");
   copyStatus.textContent = successMessage;
   if (navigator.vibrate) navigator.vibrate(35);
+  trackCopyEvent(copyScope);
 }
 
 function resetCopyButtons() {
@@ -458,8 +510,13 @@ function escapeAttribute(value) {
 }
 
 searchInput.addEventListener("input", renderCards);
-copyButton.addEventListener("click", () => copyText(buildCurrentPromptText(), copyButton, "현재 이미지의 프롬프트를 복사했습니다."));
-copySeriesButton.addEventListener("click", () => copyText(buildSeriesPromptText(), copySeriesButton, "시리즈의 모든 프롬프트를 복사했습니다."));
+copyButton.addEventListener("click", () => {
+  const copyScope = currentSlides.length > 1 ? "current_slide" : "single_prompt";
+  copyText(buildCurrentPromptText(), copyButton, "현재 이미지의 프롬프트를 복사했습니다.", copyScope);
+});
+copySeriesButton.addEventListener("click", () => {
+  copyText(buildSeriesPromptText(), copySeriesButton, "시리즈의 모든 프롬프트를 복사했습니다.", "full_series");
+});
 closeButton.addEventListener("click", () => closePrompt());
 previousSlideButton.addEventListener("click", () => goToSlide(currentSlideIndex - 1));
 nextSlideButton.addEventListener("click", () => goToSlide(currentSlideIndex + 1));
@@ -492,16 +549,40 @@ carouselViewport.addEventListener("touchend", event => {
   goToSlide(distance > 0 ? currentSlideIndex - 1 : currentSlideIndex + 1);
 }, { passive: true });
 
+[
+  ["topStoreLink", "header"],
+  ["footerStoreLink", "footer"],
+  ["dialogStoreLink", "prompt_dialog"]
+].forEach(([id, linkPosition]) => {
+  document.getElementById(id)?.addEventListener("click", event => {
+    trackAnalyticsEvent("click_chatgpt", {
+      ...getPromptAnalyticsParameters(),
+      animal: currentPrompt ? getAnimalKey(currentPrompt) : selectedAnimal,
+      link_position: linkPosition,
+      link_url: event.currentTarget.href
+    });
+  });
+});
+
+dialogAffiliateLink.addEventListener("click", event => {
+  trackAnalyticsEvent("click_affiliate", {
+    ...getPromptAnalyticsParameters(),
+    link_position: "prompt_dialog",
+    link_url: event.currentTarget.href
+  });
+});
+
 applyAnimalBranding();
 renderAnimalFilters();
 renderCategoryFilters();
 renderCards();
+trackInitialPageView();
 
 const promptFromUrl = pageUrl.searchParams.get("prompt");
 const slideFromUrl = Math.max(0, Number(pageUrl.searchParams.get("slide")) - 1 || 0);
 if (promptFromUrl) {
   const item = PROMPTS.find(prompt => String(prompt.id).toLowerCase() === promptFromUrl.toLowerCase());
-  if (item) openPrompt(item, slideFromUrl);
+  if (item) openPrompt(item, slideFromUrl, "direct_link");
   else updateListUrl();
 } else {
   updateListUrl();

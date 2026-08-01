@@ -7,6 +7,7 @@ const SITE_CONFIG = {
   "storeUrl": "https://chatgpt.com/download/",
   "instagramUrl": "https://instagram.com/damyo_zip/",
   "defaultAnimal": "cat",
+  "analyticsMeasurementId": "G-JXK7DE9SSP",
   "animals": {
     "cat": {
       "label": "고양이",
