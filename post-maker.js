@@ -61,7 +61,8 @@ function renderCategoryOptions() {
 }
 
 function updatePreviewLink() {
-  previewLink.href = `index.html?animal=${encodeURIComponent(animalInput.value || "cat")}`;
+  const animal = animalInput.value === "small" ? "hamster" : (animalInput.value || "cat");
+  previewLink.href = `index.html?animal=${encodeURIComponent(animal)}`;
 }
 
 function updateAnimalFormHints() {
@@ -76,7 +77,7 @@ function updateAnimalFormHints() {
     },
     small: {
       title: "예: 햄스터 미니 코스튬",
-      description: "예: 우리 햄스터나 소동물 사진을 넣어주세요."
+      description: "예: 우리 햄스터 사진을 넣어주세요."
     }
   };
   const current = hints[animalInput.value] || hints.cat;
@@ -104,7 +105,7 @@ async function chooseProjectFolder() {
     await loadProjectData(handle);
     projectDirectoryHandle = handle;
     const counts = ["cat", "dog", "small"].map(key => workingPrompts.filter(item => getAnimalKey(item) === key).length);
-    folderStatus.textContent = `연결됨: ${handle.name} · 고양이 ${counts[0]} · 강아지 ${counts[1]} · 소동물 ${counts[2]}`;
+    folderStatus.textContent = `연결됨: ${handle.name} · 고양이 ${counts[0]} · 강아지 ${counts[1]} · 햄스터 ${counts[2]}`;
     renderCategoryOptions();
     updateNextId();
     pickFolderButton.textContent = "다른 폴더 선택";

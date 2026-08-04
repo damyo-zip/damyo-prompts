@@ -38,18 +38,18 @@ const SITE_CONFIG = {
       "affiliateLabel": "강아지 굿즈 보러가기"
     },
     "small": {
-      "label": "햄스터·소동물",
+      "label": "햄스터",
       "emoji": "🐹",
-      "eyebrow": "SMALL PET PROMPT ARCHIVE",
-      "title": "소동물 무료 프롬프트",
-      "intro": "인스타그램에서 본 햄스터·소동물 이미지를 선택하고\\n프롬프트를 한 번에 복사하세요.",
-      "searchPlaceholder": "햄스터·소동물 프롬프트 검색",
-      "usage": "내 햄스터나 소동물 사진을 첨부한 뒤, 복사한 프롬프트를 이미지 생성창에 붙여넣어 사용하세요.",
-      "footer": "작고 사랑스러운 반려동물을 위한 아이디어를 나눕니다.",
+      "eyebrow": "HAMSTER PROMPT ARCHIVE",
+      "title": "햄스터 무료 프롬프트",
+      "intro": "인스타그램에서 본 햄스터 이미지를 선택하고\\n프롬프트를 한 번에 복사하세요.",
+      "searchPlaceholder": "햄스터 프롬프트 검색",
+      "usage": "내 햄스터 사진을 첨부한 뒤, 복사한 프롬프트를 이미지 생성창에 붙여넣어 사용하세요.",
+      "footer": "작고 사랑스러운 햄스터를 위한 아이디어를 나눕니다.",
       "instagramUrl": "",
       "chatgptUrl": "https://chatgpt.com/download/",
       "affiliateUrl": "",
-      "affiliateLabel": "소동물 굿즈 보러가기"
+      "affiliateLabel": "햄스터 굿즈 보러가기"
     }
   }
 };

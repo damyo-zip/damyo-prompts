@@ -47,19 +47,20 @@ const DEFAULT_ANIMAL_CONFIGS = {
   small: {
     label: "햄스터",
     emoji: "🐹",
-    eyebrow: "SMALL PET PROMPT ARCHIVE",
+    eyebrow: "HAMSTER PROMPT ARCHIVE",
     title: "햄스터 무료 프롬프트",
     intro: "인스타그램에서 본 햄스터 이미지를 선택하고\n프롬프트를 한 번에 복사하세요.",
     searchPlaceholder: "햄스터 프롬프트 검색",
     usage: "내 햄스터 사진을 첨부한 뒤, 복사한 프롬프트를 이미지 생성창에 붙여넣어 사용하세요.",
-    footer: "작고 사랑스러운 반려동물을 위한 아이디어를 나눕니다."
+    footer: "작고 사랑스러운 햄스터를 위한 아이디어를 나눕니다."
   }
 };
 
 const animalConfigs = { ...DEFAULT_ANIMAL_CONFIGS, ...(SITE_CONFIG.animals || {}) };
 const animalKeys = Object.keys(animalConfigs);
 const pageUrl = new URL(location.href);
-const requestedAnimal = pageUrl.searchParams.get("animal");
+const requestedAnimalValue = pageUrl.searchParams.get("animal");
+const requestedAnimal = requestedAnimalValue === "hamster" ? "small" : requestedAnimalValue;
 const lockedAnimal = animalKeys.includes(requestedAnimal) ? requestedAnimal : null;
 
 let selectedAnimal = animalKeys.includes(requestedAnimal)
@@ -126,6 +127,10 @@ function getAnimalConfig(key = selectedAnimal) {
 
 function getChatgptUrl(key = selectedAnimal) {
   return getAnimalConfig(key).chatgptUrl || SITE_CONFIG.storeUrl || "https://chatgpt.com/download/";
+}
+
+function getPublicAnimalKey(key) {
+  return key === "small" ? "hamster" : key;
 }
 
 function normalizeSlides(item) {
@@ -420,7 +425,7 @@ function goToSlide(index) {
 
 function updateListUrl() {
   const url = new URL(location.href);
-  if (lockedAnimal) url.searchParams.set("animal", lockedAnimal);
+  if (lockedAnimal) url.searchParams.set("animal", getPublicAnimalKey(lockedAnimal));
   else url.searchParams.delete("animal");
   url.searchParams.delete("prompt");
   url.searchParams.delete("slide");
@@ -430,7 +435,7 @@ function updateListUrl() {
 function updatePromptUrl() {
   if (!currentPrompt) return;
   const url = new URL(location.href);
-  url.searchParams.set("animal", lockedAnimal || getAnimalKey(currentPrompt));
+  url.searchParams.set("animal", getPublicAnimalKey(lockedAnimal || getAnimalKey(currentPrompt)));
   url.searchParams.set("prompt", currentPrompt.id);
   if (currentSlides.length > 1 && currentSlideIndex > 0) {
     url.searchParams.set("slide", String(currentSlideIndex + 1));

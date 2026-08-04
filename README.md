@@ -1,6 +1,6 @@
 # 반려동물 프롬프트 통합 보관함
 
-고양이·강아지·햄스터/소동물 인스타그램 계정에서 함께 사용하는 정적 웹사이트입니다. 사이트와 게시글 등록기는 하나만 관리하고, 주소의 `animal` 값에 따라 해당 동물 프롬프트만 보여줍니다.
+고양이·강아지·햄스터 인스타그램 계정에서 함께 사용하는 정적 웹사이트입니다. 사이트와 게시글 등록기는 하나만 관리하고, 주소의 `animal` 값에 따라 해당 동물 프롬프트만 보여줍니다.
 
 ## 동물별 전용 주소
 
@@ -9,7 +9,7 @@
 ```text
 고양이: index.html?animal=cat
 강아지: index.html?animal=dog
-햄스터·소동물: index.html?animal=small
+햄스터: index.html?animal=hamster
 ```
 
 GitHub Pages 실제 주소가 `https://example.github.io/prompts/`라면 다음처럼 사용합니다.
@@ -17,7 +17,7 @@ GitHub Pages 실제 주소가 `https://example.github.io/prompts/`라면 다음�
 ```text
 https://example.github.io/prompts/?animal=cat
 https://example.github.io/prompts/?animal=dog
-https://example.github.io/prompts/?animal=small
+https://example.github.io/prompts/?animal=hamster
 ```
 
 동물별 전용 주소로 들어온 방문자에게는 해당 동물의 게시물만 보이며, 다른 동물 탭은 표시되지 않습니다. 파라미터가 없는 기본 주소로 접속했을 때만 운영 확인용으로 세 동물 탭이 모두 표시됩니다.
@@ -42,7 +42,7 @@ Chrome 또는 Edge에서 사이트 폴더 안의 `post-maker.html`을 엽니다.
 
 1. **사이트 폴더 선택**을 누릅니다.
 2. `index.html`, `prompts.js`, `images` 폴더가 있는 최상위 폴더를 선택합니다.
-3. 고양이·강아지·햄스터/소동물 중 하나를 선택합니다.
+3. 고양이·강아지·햄스터 중 하나를 선택합니다.
 4. 제목, 카테고리, 소개와 프롬프트를 입력합니다.
 5. 이미지 한 장 또는 여러 장을 추가합니다.
 6. 필요한 경우 **이 동물 탭의 맨 위에 고정**을 체크합니다.
@@ -86,7 +86,7 @@ P-026 → images/p026-01.jpg
 ```text
 cat   고양이
 dog   강아지
-small 햄스터·소동물
+small 햄스터
 ```
 
 기존 단일 이미지 형식도 계속 지원합니다.
@@ -115,11 +115,11 @@ const SITE_CONFIG = {
       affiliateLabel: "강아지 굿즈 보러가기"
     },
     small: {
-      label: "햄스터·소동물",
-      instagramUrl: "https://instagram.com/소동물계정",
+      label: "햄스터",
+      instagramUrl: "https://instagram.com/햄스터계정",
       chatgptUrl: "https://chatgpt.com/download/",
-      affiliateUrl: "소동물용 제휴 상품 링크",
-      affiliateLabel: "소동물 굿즈 보러가기"
+      affiliateUrl: "햄스터용 제휴 상품 링크",
+      affiliateLabel: "햄스터 굿즈 보러가기"
     }
   }
 };
@@ -158,4 +158,4 @@ const SITE_CONFIG = {
 - `post-maker.html`은 방문자용이 아니라 운영자용입니다.
 - 폴더 직접 저장 기능은 Chrome 또는 Edge에서 가장 안정적입니다.
 - 공개 사이트의 클립보드 복사는 HTTPS인 GitHub Pages에서 가장 안정적으로 작동합니다.
-- 강아지와 소동물 탭은 현재 게시글이 0개이므로, 등록기에서 각각 첫 게시물을 추가하면 바로 표시됩니다.
+- 강아지와 햄스터 탭은 등록기에서 게시물을 추가하면 바로 표시됩니다.
