@@ -112,7 +112,7 @@ function runGit(args, { allowFailure = false } = {}) {
   if (result.status !== 0 && !allowFailure) {
     throw new Error(`git ${args.join(" ")} 실패: ${(result.stderr || result.stdout).trim()}`);
   }
-  return { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
+  return { status: result.status, stdout: result.stdout.trimEnd(), stderr: result.stderr.trim() };
 }
 
 function gitSnapshot() {
