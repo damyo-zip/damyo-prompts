@@ -3,10 +3,11 @@
   "post_id": "P-040",
   "title": "한밤의 책방지기",
   "category": "이미지",
+  "idea_category": "직업/상황극",
+  "idea_summary": "새벽의 작은 가게에 가장 먼저 도착한 반려견 상황극",
   "description": "우리 강아지가 포근한 심야 서점의 주인공이 된다면",
   "prompt": "첨부한 강아지 사진과 같은 개체를 유지해 ...",
   "generation_prompt": "Codex built-in image generation prompt. This may name Kongi because it is not shared publicly.",
   "caption": "짧은 Instagram 캡션",
   "alt_text": "이미지 접근성 설명"
 }
-

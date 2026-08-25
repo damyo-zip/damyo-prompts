@@ -5,7 +5,7 @@
   "scripts": {
     "kongi:inspect": "node automation/kongi.mjs inspect",
     "kongi:preflight": "node automation/kongi.mjs preflight",
+    "kongi:insights": "node automation/kongi.mjs insights",
     "kongi:test": "node automation/kongi.mjs test"
   }
 }
-

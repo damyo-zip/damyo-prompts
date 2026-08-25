@@ -13,24 +13,28 @@
 1. `.env.example`을 `.env`로 복사합니다.
 2. Instagram 전문 계정과 Meta 앱을 연결합니다.
 3. Instagram Login 방식의 사용자 ID와 장기 액세스 토큰을 `.env`의 `INSTAGRAM_USER_ID`, `INSTAGRAM_ACCESS_TOKEN`에 넣습니다.
-4. 앱/토큰에 `instagram_business_basic`, `instagram_business_content_publish` 권한이 있어야 합니다.
+4. 앱/토큰에 `instagram_business_basic`, `instagram_business_content_publish`, `instagram_business_manage_insights` 권한이 있어야 합니다.
 5. 첫 검증은 `DRY_RUN=true`로 수행하고, 실제 운영 때만 `DRY_RUN=false`로 바꿉니다.
 
 비밀값은 `.env`에만 저장되며 `.gitignore`로 제외됩니다.
 
 ## Codex 실행 절차
 
-### 1. 안전 점검과 실행 ID 생성
+### 1. 성과 업데이트, 안전 점검과 실행 ID 생성
 
 ```powershell
 node automation/kongi.mjs preflight
 ```
 
-Git worktree가 깨끗하지 않으면 즉시 중단합니다. 성공 출력의 `run_id`, `post_id`, `run_dir`, 기존 강아지 게시물 요약을 사용합니다. 완료되지 않은 실행이 있으면 같은 run을 이어가므로 중복 게시하지 않습니다.
+먼저 과거 게시물의 읽기 전용 Media Insights를 갱신하고 `performance_context`를 만듭니다. 그다음 Git worktree가 깨끗하지 않으면 즉시 중단합니다. 성공 출력의 `run_id`, `post_id`, `run_dir`, 기존 강아지 게시물 요약과 성과 컨텍스트를 사용합니다. 완료되지 않은 실행이 있으면 같은 run을 이어가므로 중복 게시하지 않습니다.
+
+Insights의 일시적 장애나 일부 미지원 지표는 새 게시를 막지 않습니다. 동일 토큰의 인증 만료가 확인된 경우에만 게시까지 실패할 가능성이 있으므로 안전하게 중단합니다. 계정 단위 Insights나 팔로워·인구통계에는 의존하지 않습니다.
 
 ### 2. 콘텐츠 기획과 초안
 
-Codex가 기존 강아지 게시물의 `title`, `category`, `description`, `prompt`를 비교하고 후보를 내부 평가한 뒤 하나를 자동 선정합니다. `automation/draft.example.json` 형식으로 `<run_dir>/draft.json`을 만듭니다.
+Codex가 기존 강아지 게시물의 `title`, `category`, `description`, `prompt`, `automation/posts/`의 `idea_category`·`idea_summary`, Instagram 성과, 최근 중복 여부를 비교하고 후보를 내부 평가한 뒤 하나를 자동 선정합니다. `automation/draft.example.json` 형식으로 `<run_dir>/draft.json`을 만듭니다. 후보 평가는 신선도, 생성 성공 가능성, 보호자의 따라하기 욕구, 과거 성과, 중복, 탐색 가치를 함께 봅니다.
+
+표본 1~4개는 성과를 수집만 하고, 5~9개는 약한 참고 신호, 10~19개는 의미 있는 신호, 20개 이상은 더 적극적인 신호로 사용합니다. 성과 기반 활용은 약 75%, 새 아이디어 탐색은 약 25%를 목표로 하며 탐색을 0으로 만들지 않습니다. 저장·공유와 `save_rate`·`share_rate`를 좋아요보다 중요한 가치 신호로 보되 성과를 절대 목표로 삼지 않습니다.
 
 공유용 `prompt`에는 “콩이”라는 이름을 넣지 않고 다음을 모두 포함합니다.
 
@@ -89,6 +93,7 @@ node automation/kongi.mjs complete --draft <run_dir>/draft.json --image <run_dir
 5. GitHub Pages 또는 `PUBLIC_SITE_URL`에서 공개 이미지 HTTP 200 확인
 6. Meta `/media` 컨테이너 생성, 상태 확인, `/media_publish` 게시
 7. media ID와 commit을 `automation/state.json` 및 JSONL 로그에 저장
+8. `automation/posts/<post_id>.json`에 아이디어와 Instagram 게시 메타데이터 저장
 
 공개 배포가 확인되지 않거나 Meta 설정/권한이 없으면 Instagram 게시 전에 안전하게 멈춥니다. 이미 `instagram_published`인 같은 run은 다시 게시하지 않습니다.
 Git commit 이후 네트워크 오류나 Meta 자격증명 누락으로 멈춘 같은 run을 다시 실행하면 저장된 단계부터 이어가며 사이트 게시물을 중복 생성하지 않습니다.
@@ -102,6 +107,20 @@ npm run kongi:test
 
 검증 항목은 `prompts.js` 파싱, 전체/동물별 개수, 다음 ID, 중복 ID, 이미지 경로, 공유 프롬프트 금칙어와 필수 지침, 이미지 검수 임계값, Git 변경 범위입니다.
 
+## Instagram 성과만 업데이트
+
+사용자가 `콩이 인스타 성과 업데이트`라고 요청하면 콘텐츠 생성·사이트 수정·Git·Instagram 게시 없이 다음 명령만 실행합니다.
+
+```powershell
+node automation/kongi.mjs insights
+```
+
+각 `instagram_media_id`에 대해 `reach`, `views`, `likes`, `comments`, `saved`, `shares`, `total_interactions`를 지표별로 독립 조회합니다. 미디어 유형이나 API 버전상 지원되지 않는 지표는 `{ "value": null, "status": "unsupported" }`에 해당하는 구조로 저장하고 나머지 수집을 계속합니다. 토큰은 출력이나 로그에 남기지 않습니다.
+
+게시 후 24h, 72h, 7d 체크포인트를 순서대로 채우며 실제 `collected_at`과 `age_hours`를 함께 기록합니다. 24시간 전 최초 수집은 `initial`이며 24h로 가장하지 않습니다. 체크포인트가 아닌 `latest`는 기본 12시간 간격이고, 7d 체크포인트가 끝난 오래된 게시물은 반복 조회하지 않습니다.
+
+각 스냅샷에는 reach 기준 `like_rate`, `comment_rate`, `save_rate`, `share_rate`, `interaction_rate`를 저장합니다. reach가 0이거나 값이 없으면 비율은 `null`입니다. 카테고리 요약과 소표본 정책은 `automation/insights-summary.json`에 기록되어 다음 preflight의 `performance_context`로 전달됩니다.
+
 ## 런타임 파일
 
 - `automation/reference/kongi.png`: 수정하지 않는 콩이 canonical reference
@@ -109,5 +128,7 @@ npm run kongi:test
 - `automation/backups/<timestamp>/`: 실제 수정 전 백업
 - `automation/logs/YYYY-MM-DD.jsonl`: 단계별 실행 로그
 - `automation/state.json`: 최신 run 단계, post ID, commit, Instagram media ID
+- `automation/posts/<post_id>.json`: 아이디어, 게시 메타데이터, 시간별 Media Insights 스냅샷
+- `automation/insights-summary.json`: 카테고리별 성과 및 다음 기획용 과적합 방지 컨텍스트
 
 런타임 파일과 `.env`는 Git에 포함되지 않습니다.

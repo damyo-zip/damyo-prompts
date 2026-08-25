@@ -4,6 +4,7 @@
 automation/backups/
 automation/generated/
 automation/logs/
+automation/posts/
 automation/runs/
 automation/state.json
-
+automation/insights-summary.json

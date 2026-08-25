@@ -14,6 +14,13 @@ import { spawnSync } from "node:child_process";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
+import {
+  collectionPlan,
+  deriveRates,
+  samplePolicy,
+  savePublishedPostMetadata,
+  updateInstagramInsights
+} from "./insights.mjs";
 
 const automationDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = dirname(automationDir);
@@ -228,6 +235,15 @@ async function commandInspect() {
 
 async function commandPreflight() {
   const allowDevelopmentDirty = hasFlag("--development-dirty") && booleanValue(process.env.DRY_RUN, true);
+  let performanceUpdate;
+  try {
+    performanceUpdate = await updateInstagramInsights();
+  } catch (error) {
+    if (error.kind === "auth_invalid") throw error;
+    performanceUpdate = { auth_status: "temporary_failure", error: error.message };
+    await appendLog("insights-update", "insights_failed", { error: error.message });
+  }
+
   const snapshot = gitSnapshot();
   assertCleanGit(snapshot, allowDevelopmentDirty);
   if (!(await exists(referencePath))) throw new Error(`콩이 기준 이미지가 없습니다: ${referencePath}`);
@@ -249,6 +265,20 @@ async function commandPreflight() {
     baseline_commit: activeState(previous) ? previous.baseline_commit : snapshot.head,
     existing_count: site.count,
     existing_dog_posts: site.dogs,
+    performance_context: performanceUpdate.summary || null,
+    insights_update: {
+      auth_status: performanceUpdate.auth_status,
+      checked_posts: performanceUpdate.checked_posts || 0,
+      new_snapshots: performanceUpdate.new_snapshots || 0,
+      error: performanceUpdate.error || null
+    },
+    performance_report: performanceUpdate.summary ? {
+      measured_post_count: performanceUpdate.summary.measured_post_count,
+      best_save_rate: performanceUpdate.summary.best_save_rate,
+      best_share_rate: performanceUpdate.summary.best_share_rate,
+      planning_use: performanceUpdate.summary.idea_selection?.use_performance || false,
+      guidance: performanceUpdate.summary.idea_selection?.guidance || null
+    } : null,
     reference_image: referencePath,
     git: snapshot
   };
@@ -258,7 +288,9 @@ async function commandPreflight() {
     dry_run: payload.dry_run,
     baseline_commit: payload.baseline_commit,
     existing_count: site.count,
-    run_dir: runDir
+    run_dir: runDir,
+    insights_update: payload.insights_update,
+    performance_report: payload.performance_report
   });
   console.log(JSON.stringify(payload, null, 2));
 }
@@ -535,12 +567,18 @@ async function continuePublishedRun(draft, state) {
       instagram_container_id: instagram.container_id,
       instagram_media_id: instagram.media_id
     });
+    try {
+      await savePublishedPostMetadata({ draft, state: published });
+    } catch (metadataError) {
+      await appendLog(draft.run_id, "metadata_save_failed", { error: metadataError.message });
+    }
     console.log(JSON.stringify({
       resumed: true,
       site_published: true,
       instagram_published: true,
       git_commit: published.git_commit,
       public_image_url: published.public_image_url,
+      instagram_performance_update: published.performance_report || null,
       ...instagram
     }, null, 2));
   }
@@ -559,6 +597,7 @@ async function commandComplete() {
   const state = await readJson(statePath);
   if (!draft || !review || !state) throw new Error("초안, 검수, 실행 상태를 읽지 못했습니다.");
   if (state.stage === "instagram_published" && state.run_id === draft.run_id) {
+    await savePublishedPostMetadata({ draft, state });
     console.log(JSON.stringify({ skipped: true, reason: "already_published", instagram_media_id: state.instagram_media_id }, null, 2));
     return;
   }
@@ -666,14 +705,26 @@ async function commandComplete() {
       console.log(JSON.stringify({ site_published: true, instagram_published: false, missing_meta_settings: instagram.missing, git_commit: commit, public_image_url: imageUrl }, null, 2));
       return;
     }
-    await updateState(draft.run_id, "instagram_published", {
+    const published = await updateState(draft.run_id, "instagram_published", {
       post_id: draft.post_id,
       git_commit: commit,
       public_image_url: imageUrl,
       instagram_container_id: instagram.container_id,
       instagram_media_id: instagram.media_id
     });
-    console.log(JSON.stringify({ site_published: true, instagram_published: true, git_commit: commit, public_image_url: imageUrl, ...instagram }, null, 2));
+    try {
+      await savePublishedPostMetadata({ draft, state: published });
+    } catch (metadataError) {
+      await appendLog(draft.run_id, "metadata_save_failed", { error: metadataError.message });
+    }
+    console.log(JSON.stringify({
+      site_published: true,
+      instagram_published: true,
+      git_commit: commit,
+      public_image_url: imageUrl,
+      instagram_performance_update: published.performance_report || null,
+      ...instagram
+    }, null, 2));
   } catch (error) {
     if (siteWritten && !commitCreated) {
       await copyFile(backupPrompts, promptsPath);
@@ -696,6 +747,18 @@ async function commandFail() {
   console.log(JSON.stringify({ run_id: runId, stage: "failed", reason }, null, 2));
 }
 
+async function commandInsights() {
+  const result = await updateInstagramInsights();
+  await appendLog("insights-update", "insights_updated", {
+    auth_status: result.auth_status,
+    checked_posts: result.checked_posts,
+    new_snapshots: result.new_snapshots,
+    supported_metrics: result.supported_metrics || []
+  });
+  console.log(JSON.stringify(result, null, 2));
+  if (result.auth_status === "permission_missing") process.exitCode = 1;
+}
+
 async function commandTest() {
   const { PROMPTS, source } = await readSiteData();
   const summary = summarizeSite(PROMPTS);
@@ -714,6 +777,27 @@ async function commandTest() {
   if (!passingReview.passed) failures.push("검수 임계값 경계 테스트 실패");
   const failingReview = validateReview({ run_id: "test", attempt: 1, identity_score: 74, visual_quality_score: 100, concept_score: 100, fatal_issue: false, notes: "threshold" }, "test");
   if (failingReview.passed) failures.push("검수 실패 임계값 테스트 실패");
+  const rates = deriveRates({
+    reach: { status: "ok", value: 100 }, likes: { status: "ok", value: 10 },
+    comments: { status: "ok", value: 2 }, saved: { status: "ok", value: 5 },
+    shares: { status: "ok", value: 3 }, total_interactions: { status: "ok", value: 20 }
+  });
+  if (rates.save_rate !== 0.05 || rates.share_rate !== 0.03 || rates.interaction_rate !== 0.2) failures.push("Insights 비율 계산 테스트 실패");
+  if (deriveRates({ reach: { status: "ok", value: 0 }, likes: { status: "ok", value: 1 } }).like_rate !== null) failures.push("Insights 0 reach 보호 테스트 실패");
+  if (samplePolicy(1).planning_use || samplePolicy(5).level !== "weak_signal" || samplePolicy(20).level !== "stronger") failures.push("Insights 소표본 정책 테스트 실패");
+  const initialPlan = collectionPlan({ published_at: new Date(Date.now() - 1_800_000).toISOString(), insights: { snapshots: [] } });
+  if (initialPlan?.snapshot_type !== "initial" || initialPlan?.checkpoint) failures.push("Insights initial checkpoint 테스트 실패");
+  const checkpointPlan = collectionPlan({ published_at: new Date(Date.now() - 30 * 3_600_000).toISOString(), insights: { snapshots: [] } });
+  if (checkpointPlan?.checkpoint !== "24h") failures.push("Insights 24h checkpoint 테스트 실패");
+  const fixedNow = new Date("2026-08-25T12:00:00.000Z");
+  const publishedAt = new Date(fixedNow.getTime() - 80 * 3_600_000).toISOString();
+  const snapshot24h = { collected_at: new Date(fixedNow.getTime() - 50 * 3_600_000).toISOString(), checkpoint: "24h" };
+  if (collectionPlan({ published_at: publishedAt, insights: { snapshots: [snapshot24h] } }, fixedNow)?.checkpoint !== "72h") failures.push("Insights 72h checkpoint 테스트 실패");
+  const oldPublishedAt = new Date(fixedNow.getTime() - 200 * 3_600_000).toISOString();
+  const snapshot72h = { collected_at: new Date(fixedNow.getTime() - 100 * 3_600_000).toISOString(), checkpoint: "72h" };
+  if (collectionPlan({ published_at: oldPublishedAt, insights: { snapshots: [snapshot24h, snapshot72h] } }, fixedNow)?.checkpoint !== "7d") failures.push("Insights 7d checkpoint 테스트 실패");
+  const recentLatest = { collected_at: new Date(fixedNow.getTime() - 2 * 3_600_000).toISOString(), checkpoint: null };
+  if (collectionPlan({ published_at: publishedAt, insights: { snapshots: [snapshot24h, snapshot72h, recentLatest] } }, fixedNow) !== null) failures.push("Insights 12시간 중복 방지 테스트 실패");
   const result = { passed: failures.length === 0, failures, site: summary };
   console.log(JSON.stringify(result, null, 2));
   if (failures.length) process.exitCode = 1;
@@ -725,6 +809,7 @@ async function main() {
   if (command === "inspect") return commandInspect();
   if (command === "preflight") return commandPreflight();
   if (command === "complete") return commandComplete();
+  if (command === "insights") return commandInsights();
   if (command === "fail") return commandFail();
   if (command === "test") return commandTest();
   throw new Error(`알 수 없는 명령: ${command}`);
@@ -742,6 +827,7 @@ export {
   nextPostId,
   parsePromptsSource,
   summarizeSite,
+  commandInsights,
   validateDraft,
   validateReview
 };

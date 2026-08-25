@@ -1,0 +1,326 @@
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const automationDir = dirname(fileURLToPath(import.meta.url));
+const postsDir = join(automationDir, "posts");
+const statePath = join(automationDir, "state.json");
+const summaryPath = join(automationDir, "insights-summary.json");
+const METRICS = ["reach", "views", "likes", "comments", "saved", "shares", "total_interactions"];
+const CHECKPOINTS = [
+  { name: "24h", hours: 24 },
+  { name: "72h", hours: 72 },
+  { name: "7d", hours: 168 }
+];
+
+async function readJson(path, fallback = null) {
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") return fallback;
+    throw error;
+  }
+}
+
+async function writeJson(path, value) {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(temporary, path);
+}
+
+function postPath(postId) {
+  return join(postsDir, `${String(postId).toLowerCase().replace(/[^a-z0-9-]/g, "-")}.json`);
+}
+
+function sanitizeMessage(message) {
+  let result = String(message || "unknown error");
+  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
+  if (token) result = result.split(token).join("[REDACTED]");
+  return result.replace(/access_token=[^&\s]+/gi, "access_token=[REDACTED]");
+}
+
+function metricValue(snapshot, metric) {
+  const item = snapshot?.metrics?.[metric];
+  return item?.status === "ok" && typeof item.value === "number" ? item.value : null;
+}
+
+function safeRate(numerator, reach) {
+  return typeof numerator === "number" && typeof reach === "number" && reach > 0
+    ? Number((numerator / reach).toFixed(6))
+    : null;
+}
+
+function deriveRates(metrics) {
+  const reach = metrics?.reach?.status === "ok" ? metrics.reach.value : null;
+  const value = name => metrics?.[name]?.status === "ok" ? metrics[name].value : null;
+  return {
+    like_rate: safeRate(value("likes"), reach),
+    comment_rate: safeRate(value("comments"), reach),
+    save_rate: safeRate(value("saved"), reach),
+    share_rate: safeRate(value("shares"), reach),
+    interaction_rate: safeRate(value("total_interactions"), reach)
+  };
+}
+
+function samplePolicy(count) {
+  if (count < 5) return { level: "collect_only", performance_weight: 0, planning_use: false };
+  if (count < 10) return { level: "weak_signal", performance_weight: 0.15, planning_use: true };
+  if (count < 20) return { level: "meaningful", performance_weight: 0.35, planning_use: true };
+  return { level: "stronger", performance_weight: 0.5, planning_use: true };
+}
+
+function ageHours(publishedAt, now = new Date()) {
+  const milliseconds = now.getTime() - new Date(publishedAt).getTime();
+  return Number((Math.max(0, milliseconds) / 3_600_000).toFixed(2));
+}
+
+function collectionPlan(post, now = new Date(), minimumHours = 12) {
+  const snapshots = post.insights?.snapshots || [];
+  const age = ageHours(post.published_at, now);
+  const recorded = new Set(snapshots.map(item => item.checkpoint).filter(Boolean));
+  const due = CHECKPOINTS.find(item => age >= item.hours && !recorded.has(item.name));
+  if (due) return { snapshot_type: "checkpoint", checkpoint: due.name, age_hours: age };
+  if (!snapshots.length) return { snapshot_type: "initial", checkpoint: null, age_hours: age };
+  if (recorded.has("7d")) return null;
+  const last = new Date(snapshots.at(-1).collected_at);
+  if ((now.getTime() - last.getTime()) / 3_600_000 >= minimumHours) {
+    return { snapshot_type: "latest", checkpoint: null, age_hours: age };
+  }
+  return null;
+}
+
+function classifyMetaError(error, status) {
+  const code = Number(error?.code || 0);
+  const message = sanitizeMessage(error?.message || `HTTP ${status}`);
+  if (code === 190 || code === 102 || /expired|invalid.*token|oauth.*token|access token/i.test(message)) {
+    return { status: "auth_error", code, message };
+  }
+  if (code === 10 || code === 200 || /permission|manage_insights|not authorized/i.test(message)) {
+    return { status: "permission_error", value: null, code, message };
+  }
+  if (code === 100 || /unsupported|not supported|not available|invalid metric/i.test(message)) {
+    return { status: "unsupported", value: null, code, message };
+  }
+  return { status: "error", value: null, code: code || status, message };
+}
+
+async function fetchMetric(mediaId, metric) {
+  const base = (process.env.META_GRAPH_BASE_URL || "https://graph.instagram.com").replace(/\/$/, "");
+  const version = process.env.META_API_VERSION;
+  if (!/^v\d+\.\d+$/.test(version || "")) throw new Error("META_API_VERSION 형식이 올바르지 않습니다.");
+  const url = new URL(`${base}/${version}/${encodeURIComponent(mediaId)}/insights`);
+  url.searchParams.set("metric", metric);
+  try {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${process.env.INSTAGRAM_ACCESS_TOKEN}` },
+      signal: AbortSignal.timeout(20_000)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.error) return classifyMetaError(payload.error, response.status);
+    const item = Array.isArray(payload.data) ? payload.data[0] : null;
+    let value = null;
+    if (item?.total_value && Object.hasOwn(item.total_value, "value")) value = item.total_value.value;
+    else if (Array.isArray(item?.values) && item.values.length) value = item.values.at(-1)?.value ?? null;
+    return { status: "ok", value: typeof value === "number" ? value : null };
+  } catch (error) {
+    return { status: "error", value: null, code: "network", message: sanitizeMessage(error.message) };
+  }
+}
+
+async function collectMetrics(mediaId) {
+  const metrics = {};
+  for (const metric of METRICS) metrics[metric] = await fetchMetric(mediaId, metric);
+  return metrics;
+}
+
+async function metadataFromCurrentState() {
+  const state = await readJson(statePath, null);
+  if (!state?.post_id || !state?.instagram_media_id || state.stage !== "instagram_published") return null;
+  const draft = state.run_dir ? await readJson(join(state.run_dir, "draft.json"), {}) : {};
+  return {
+    post_id: state.post_id,
+    title: draft.title || state.title || "",
+    idea_category: draft.idea_category || draft.category || "미분류",
+    idea_summary: draft.idea_summary || draft.description || "",
+    published_at: state.updated_at,
+    instagram_media_id: state.instagram_media_id,
+    git_commit: state.git_commit || null,
+    public_image_url: state.public_image_url || null,
+    insights: { snapshots: [] }
+  };
+}
+
+async function listPosts() {
+  await mkdir(postsDir, { recursive: true });
+  const current = await metadataFromCurrentState();
+  if (current && !(await readJson(postPath(current.post_id), null))) await writeJson(postPath(current.post_id), current);
+  const files = (await readdir(postsDir)).filter(name => name.endsWith(".json"));
+  const posts = [];
+  for (const file of files) {
+    const post = await readJson(join(postsDir, file), null);
+    if (post?.post_id && post?.instagram_media_id && post?.published_at) posts.push(post);
+  }
+  return posts.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
+}
+
+function average(values) {
+  const valid = values.filter(value => typeof value === "number");
+  return valid.length ? Number((valid.reduce((sum, value) => sum + value, 0) / valid.length).toFixed(6)) : null;
+}
+
+function buildSummary(posts) {
+  const measured = posts.filter(post => post.insights?.snapshots?.length);
+  const categories = {};
+  for (const post of measured) {
+    const latest = post.insights.snapshots.at(-1);
+    const category = post.idea_category || "미분류";
+    const bucket = categories[category] ||= { posts: [] };
+    bucket.posts.push({ post, latest });
+  }
+  const categorySummary = Object.fromEntries(Object.entries(categories).map(([name, bucket]) => {
+    const metricAverage = metric => average(bucket.posts.map(({ latest }) => metricValue(latest, metric)));
+    const rateAverage = rate => average(bucket.posts.map(({ latest }) => latest.derived?.[rate] ?? null));
+    return [name, {
+      post_count: bucket.posts.length,
+      confidence: bucket.posts.length === 1 ? "very_low" : bucket.posts.length < 5 ? "low" : "usable",
+      average_reach: metricAverage("reach"),
+      average_views: metricAverage("views"),
+      average_likes: metricAverage("likes"),
+      average_saved: metricAverage("saved"),
+      average_shares: metricAverage("shares"),
+      average_save_rate: rateAverage("save_rate"),
+      average_share_rate: rateAverage("share_rate"),
+      average_interaction_rate: rateAverage("interaction_rate")
+    }];
+  }));
+  const best = rate => measured
+    .map(post => ({ post_id: post.post_id, value: post.insights.snapshots.at(-1).derived?.[rate] ?? null }))
+    .filter(item => typeof item.value === "number")
+    .sort((a, b) => b.value - a.value)[0] || null;
+  const policy = samplePolicy(measured.length);
+  return {
+    generated_at: new Date().toISOString(),
+    measured_post_count: measured.length,
+    sample_policy: policy,
+    idea_selection: {
+      use_performance: policy.planning_use,
+      performance_weight: policy.performance_weight,
+      exploitation_target: 0.75,
+      exploration_target: 0.25,
+      guidance: policy.level === "collect_only"
+        ? "표본이 4개 이하이므로 성과는 수집만 하고 아이디어 선택에는 강하게 반영하지 않습니다."
+        : "저장·공유 비율을 좋아요보다 우선 신호로 참고하되 신선도와 탐색 가치를 함께 평가합니다."
+    },
+    best_save_rate: best("save_rate"),
+    best_share_rate: best("share_rate"),
+    categories: categorySummary
+  };
+}
+
+async function savePublishedPostMetadata({ draft, state }) {
+  const path = postPath(draft.post_id);
+  const previous = await readJson(path, {});
+  const metadata = {
+    ...previous,
+    post_id: draft.post_id,
+    title: draft.title,
+    idea_category: draft.idea_category || draft.category || "미분류",
+    idea_summary: draft.idea_summary || draft.description || "",
+    published_at: previous.published_at || state.updated_at || new Date().toISOString(),
+    instagram_media_id: state.instagram_media_id,
+    git_commit: state.git_commit || null,
+    public_image_url: state.public_image_url || null,
+    insights: previous.insights || { snapshots: [] }
+  };
+  await writeJson(path, metadata);
+  return path;
+}
+
+async function updateInstagramInsights({ now = new Date() } = {}) {
+  const missing = [
+    !process.env.INSTAGRAM_ACCESS_TOKEN && "INSTAGRAM_ACCESS_TOKEN",
+    !process.env.META_API_VERSION && "META_API_VERSION"
+  ].filter(Boolean);
+  if (missing.length) {
+    const posts = await listPosts();
+    const summary = buildSummary(posts);
+    await writeJson(summaryPath, summary);
+    return { auth_status: "not_configured", missing, checked_posts: 0, new_snapshots: 0, summary, summary_path: summaryPath };
+  }
+
+  const posts = await listPosts();
+  const minimumHours = Math.max(1, Number(process.env.INSIGHTS_LATEST_MIN_HOURS || 12));
+  let checkedPosts = 0;
+  let newSnapshots = 0;
+  const postResults = [];
+  for (const post of posts) {
+    const plan = collectionPlan(post, now, minimumHours);
+    if (!plan) continue;
+    checkedPosts += 1;
+    const metrics = await collectMetrics(post.instagram_media_id);
+    const authError = Object.values(metrics).find(item => item.status === "auth_error");
+    if (authError) {
+      const error = new Error(`Instagram Insights 인증 실패: ${authError.message}`);
+      error.kind = "auth_invalid";
+      throw error;
+    }
+    const permissionError = Object.values(metrics).find(item => item.status === "permission_error");
+    if (permissionError) {
+      postResults.push({ post_id: post.post_id, status: "permission_missing", required_permission: "instagram_business_manage_insights" });
+      continue;
+    }
+    const supportedCount = Object.values(metrics).filter(item => item.status === "ok").length;
+    const unsupportedCount = Object.values(metrics).filter(item => item.status === "unsupported").length;
+    if (!supportedCount && unsupportedCount !== METRICS.length) {
+      postResults.push({ post_id: post.post_id, status: "temporary_failure" });
+      continue;
+    }
+    const snapshot = {
+      collected_at: now.toISOString(),
+      age_hours: plan.age_hours,
+      snapshot_type: plan.snapshot_type,
+      checkpoint: plan.checkpoint,
+      metrics,
+      derived: deriveRates(metrics)
+    };
+    post.insights ||= { snapshots: [] };
+    post.insights.snapshots.push(snapshot);
+    await writeJson(postPath(post.post_id), post);
+    newSnapshots += 1;
+    postResults.push({ post_id: post.post_id, status: "collected", snapshot });
+  }
+  const refreshed = await listPosts();
+  const summary = buildSummary(refreshed);
+  await writeJson(summaryPath, summary);
+  const authStatus = !checkedPosts
+    ? "not_checked_no_due_posts"
+    : postResults.some(item => item.status === "permission_missing")
+      ? "permission_missing"
+      : postResults.some(item => item.status === "temporary_failure") && !newSnapshots
+        ? "temporary_failure"
+        : "verified";
+  return {
+    auth_status: authStatus,
+    checked_posts: checkedPosts,
+    new_snapshots: newSnapshots,
+    supported_metrics: [...new Set(postResults.flatMap(result => result.snapshot ? METRICS.filter(metric => result.snapshot.metrics[metric]?.status === "ok") : []))],
+    posts: postResults,
+    summary,
+    posts_dir: postsDir,
+    summary_path: summaryPath
+  };
+}
+
+export {
+  CHECKPOINTS,
+  METRICS,
+  buildSummary,
+  collectionPlan,
+  deriveRates,
+  postsDir,
+  samplePolicy,
+  savePublishedPostMetadata,
+  summaryPath,
+  updateInstagramInsights
+};
