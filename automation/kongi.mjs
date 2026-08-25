@@ -1059,16 +1059,26 @@ async function commandFail() {
   console.log(JSON.stringify({ run_id: runId, stage: "failed", reason }, null, 2));
 }
 
-async function commandInsights() {
+async function commandInsights({ silent = false } = {}) {
   const result = await updateInstagramInsights({ context: insightsContext() });
   await appendLog("insights-update", "insights_updated", {
     auth_status: result.auth_status,
+    examined_posts: result.examined_posts || 0,
     checked_posts: result.checked_posts,
+    api_called_posts: result.api_called_posts || 0,
     new_snapshots: result.new_snapshots,
     supported_metrics: result.supported_metrics || []
   });
-  console.log(JSON.stringify(result, null, 2));
+  if (!silent) console.log(JSON.stringify(result, null, 2));
   if (result.auth_status === "permission_missing") process.exitCode = 1;
+  return result;
+}
+
+async function runInsightsForAccount(config, options = {}) {
+  configureAccount(config);
+  await loadEnv();
+  await migrateLegacyKongiRuntime();
+  return commandInsights(options);
 }
 
 async function commandCtaCheck() {
@@ -1235,6 +1245,7 @@ export {
   nextPostId,
   parsePromptsSource,
   runForAccount,
+  runInsightsForAccount,
   summarizeSite,
   commandInsights,
   validateDraft,

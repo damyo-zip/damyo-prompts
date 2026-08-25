@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "insights": "node automation/run.mjs insights",
     "kongi": "node automation/run.mjs preflight kongi",
     "kongi:inspect": "node automation/run.mjs inspect kongi",
     "kongi:preflight": "node automation/run.mjs preflight kongi",

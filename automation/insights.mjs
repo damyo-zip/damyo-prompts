@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,12 +30,15 @@ async function writeJson(path, value) {
 }
 
 function resolveContext(context = {}) {
+  const accountKey = context.accountKey || "kongi";
+  const resolvedSummaryPath = context.summaryPath || summaryPath;
   return {
-    accountKey: context.accountKey || "kongi",
+    accountKey,
     displayName: context.displayName || "콩이",
     postsDir: context.postsDir || postsDir,
     statePath: context.statePath || statePath,
-    summaryPath: context.summaryPath || summaryPath,
+    summaryPath: resolvedSummaryPath,
+    lockPath: context.lockPath || join(dirname(resolvedSummaryPath), `.${accountKey}-collector.lock`),
     accessToken: context.accessToken ?? process.env.INSTAGRAM_ACCESS_TOKEN ?? "",
     accessTokenEnv: context.accessTokenEnv || "INSTAGRAM_ACCESS_TOKEN"
   };
@@ -99,6 +102,48 @@ function collectionPlan(post, now = new Date(), minimumHours = 12) {
   const last = new Date(snapshots.at(-1).collected_at);
   if ((now.getTime() - last.getTime()) / 3_600_000 >= minimumHours) {
     return { snapshot_type: "latest", checkpoint: null, age_hours: age };
+  }
+  return null;
+}
+
+function collectionSkipReason(post, now = new Date(), minimumHours = 12) {
+  const snapshots = post.insights?.snapshots || [];
+  const recorded = new Set(snapshots.map(item => item.checkpoint).filter(Boolean));
+  if (recorded.has("7d")) return "checkpoint_7d_complete";
+  if (!snapshots.length) return null;
+  const last = new Date(snapshots.at(-1).collected_at);
+  if (Number.isNaN(last.getTime())) return "invalid_last_collected_at";
+  const elapsed = (now.getTime() - last.getTime()) / 3_600_000;
+  return elapsed < minimumHours ? "minimum_interval_not_elapsed" : "not_due";
+}
+
+async function acquireCollectorLock(path, staleMilliseconds = 2 * 3_600_000) {
+  await mkdir(dirname(path), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = await open(path, "wx");
+      await handle.writeFile(`${JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() })}\n`, "utf8");
+      return async () => {
+        await handle.close().catch(() => {});
+        await unlink(path).catch(error => {
+          if (error.code !== "ENOENT") throw error;
+        });
+      };
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      let stale = false;
+      try {
+        const metadata = await stat(path);
+        stale = Date.now() - metadata.mtimeMs > staleMilliseconds;
+      } catch (statError) {
+        if (statError.code !== "ENOENT") throw statError;
+        continue;
+      }
+      if (!stale || attempt > 0) return null;
+      await unlink(path).catch(error => {
+        if (error.code !== "ENOENT") throw error;
+      });
+    }
   }
   return null;
 }
@@ -268,7 +313,7 @@ async function savePublishedPostMetadata({ draft, state, context = {} }) {
   return path;
 }
 
-async function updateInstagramInsights({ now = new Date(), context = {} } = {}) {
+async function updateInstagramInsightsUnlocked({ now = new Date(), context = {} } = {}) {
   const resolved = resolveContext(context);
   const missing = [
     !resolved.accessToken && resolved.accessTokenEnv,
@@ -278,49 +323,83 @@ async function updateInstagramInsights({ now = new Date(), context = {} } = {}) 
     const posts = await listPosts(resolved);
     const summary = buildSummary(posts);
     await writeJson(resolved.summaryPath, summary);
-    return { account_key: resolved.accountKey, auth_status: "not_configured", missing, checked_posts: 0, new_snapshots: 0, summary, summary_path: resolved.summaryPath };
+    return {
+      account_key: resolved.accountKey,
+      auth_status: "not_configured",
+      missing,
+      examined_posts: posts.length,
+      checked_posts: 0,
+      api_called_posts: 0,
+      new_snapshots: 0,
+      posts: posts.map(post => ({ post_id: post.post_id, status: "skipped", reason: "credentials_not_configured" })),
+      summary,
+      summary_path: resolved.summaryPath
+    };
   }
 
   const posts = await listPosts(resolved);
   const minimumHours = Math.max(1, Number(process.env.INSIGHTS_LATEST_MIN_HOURS || 12));
   let checkedPosts = 0;
+  let apiCalledPosts = 0;
   let newSnapshots = 0;
   const postResults = [];
   for (const post of posts) {
-    const plan = collectionPlan(post, now, minimumHours);
-    if (!plan) continue;
-    checkedPosts += 1;
-    const metrics = await collectMetrics(post.instagram_media_id, resolved);
-    const authError = Object.values(metrics).find(item => item.status === "auth_error");
-    if (authError) {
-      const error = new Error(`Instagram Insights 인증 실패: ${authError.message}`);
-      error.kind = "auth_invalid";
-      throw error;
+    try {
+      const plan = collectionPlan(post, now, minimumHours);
+      if (!plan) {
+        postResults.push({
+          post_id: post.post_id,
+          status: "skipped",
+          reason: collectionSkipReason(post, now, minimumHours) || "not_due"
+        });
+        continue;
+      }
+      checkedPosts += 1;
+      apiCalledPosts += 1;
+      const metrics = await collectMetrics(post.instagram_media_id, resolved);
+      const authError = Object.values(metrics).find(item => item.status === "auth_error");
+      if (authError) {
+        const error = new Error(`Instagram Insights 인증 실패: ${authError.message}`);
+        error.kind = "auth_invalid";
+        throw error;
+      }
+      const permissionError = Object.values(metrics).find(item => item.status === "permission_error");
+      if (permissionError) {
+        postResults.push({ post_id: post.post_id, status: "permission_missing", required_permission: "instagram_business_manage_insights" });
+        continue;
+      }
+      const supportedCount = Object.values(metrics).filter(item => item.status === "ok").length;
+      const unsupportedCount = Object.values(metrics).filter(item => item.status === "unsupported").length;
+      if (!supportedCount && unsupportedCount !== METRICS.length) {
+        const metricError = Object.values(metrics).find(item => item.message);
+        postResults.push({
+          post_id: post.post_id,
+          status: "temporary_failure",
+          error: metricError ? sanitizeMessage(metricError.message, resolved.accessToken) : "No supported metric response"
+        });
+        continue;
+      }
+      const snapshot = {
+        collected_at: now.toISOString(),
+        age_hours: plan.age_hours,
+        snapshot_type: plan.snapshot_type,
+        checkpoint: plan.checkpoint,
+        metrics,
+        derived: deriveRates(metrics)
+      };
+      post.insights ||= { snapshots: [] };
+      post.insights.snapshots.push(snapshot);
+      await writeJson(postPath(post.post_id, resolved), post);
+      newSnapshots += 1;
+      postResults.push({ post_id: post.post_id, status: "collected", snapshot });
+    } catch (error) {
+      if (error.kind === "auth_invalid") throw error;
+      postResults.push({
+        post_id: post.post_id,
+        status: "error",
+        error: sanitizeMessage(error.message, resolved.accessToken)
+      });
     }
-    const permissionError = Object.values(metrics).find(item => item.status === "permission_error");
-    if (permissionError) {
-      postResults.push({ post_id: post.post_id, status: "permission_missing", required_permission: "instagram_business_manage_insights" });
-      continue;
-    }
-    const supportedCount = Object.values(metrics).filter(item => item.status === "ok").length;
-    const unsupportedCount = Object.values(metrics).filter(item => item.status === "unsupported").length;
-    if (!supportedCount && unsupportedCount !== METRICS.length) {
-      postResults.push({ post_id: post.post_id, status: "temporary_failure" });
-      continue;
-    }
-    const snapshot = {
-      collected_at: now.toISOString(),
-      age_hours: plan.age_hours,
-      snapshot_type: plan.snapshot_type,
-      checkpoint: plan.checkpoint,
-      metrics,
-      derived: deriveRates(metrics)
-    };
-    post.insights ||= { snapshots: [] };
-    post.insights.snapshots.push(snapshot);
-    await writeJson(postPath(post.post_id, resolved), post);
-    newSnapshots += 1;
-    postResults.push({ post_id: post.post_id, status: "collected", snapshot });
   }
   const refreshed = await listPosts(resolved);
   const summary = buildSummary(refreshed);
@@ -329,13 +408,15 @@ async function updateInstagramInsights({ now = new Date(), context = {} } = {}) 
     ? "not_checked_no_due_posts"
     : postResults.some(item => item.status === "permission_missing")
       ? "permission_missing"
-      : postResults.some(item => item.status === "temporary_failure") && !newSnapshots
+      : postResults.some(item => ["temporary_failure", "error"].includes(item.status)) && !newSnapshots
         ? "temporary_failure"
         : "verified";
   return {
     account_key: resolved.accountKey,
     auth_status: authStatus,
+    examined_posts: posts.length,
     checked_posts: checkedPosts,
+    api_called_posts: apiCalledPosts,
     new_snapshots: newSnapshots,
     supported_metrics: [...new Set(postResults.flatMap(result => result.snapshot ? METRICS.filter(metric => result.snapshot.metrics[metric]?.status === "ok") : []))],
     posts: postResults,
@@ -345,11 +426,35 @@ async function updateInstagramInsights({ now = new Date(), context = {} } = {}) 
   };
 }
 
+async function updateInstagramInsights({ now = new Date(), context = {} } = {}) {
+  const resolved = resolveContext(context);
+  const releaseLock = await acquireCollectorLock(resolved.lockPath);
+  if (!releaseLock) {
+    return {
+      account_key: resolved.accountKey,
+      auth_status: "skipped_locked",
+      examined_posts: 0,
+      checked_posts: 0,
+      api_called_posts: 0,
+      new_snapshots: 0,
+      posts: [{ status: "skipped", reason: "collector_already_running" }],
+      summary: await readJson(resolved.summaryPath, null),
+      summary_path: resolved.summaryPath
+    };
+  }
+  try {
+    return await updateInstagramInsightsUnlocked({ now, context: resolved });
+  } finally {
+    await releaseLock();
+  }
+}
+
 export {
   CHECKPOINTS,
   METRICS,
   buildSummary,
   collectionPlan,
+  collectionSkipReason,
   deriveRates,
   postsDir,
   samplePolicy,

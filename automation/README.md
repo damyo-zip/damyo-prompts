@@ -135,6 +135,20 @@ node automation/run.mjs insights hamnimi
 
 선택한 계정의 `instagram_media_id`만 대상으로 `reach`, `views`, `likes`, `comments`, `saved`, `shares`, `total_interactions`를 지표별로 독립 조회합니다. 미디어 유형이나 API 버전상 지원되지 않는 지표는 `{ "value": null, "status": "unsupported" }`에 해당하는 구조로 저장하고 나머지 수집을 계속합니다. 다른 계정의 토큰이나 성과 데이터로 fallback하지 않으며 토큰은 출력이나 로그에 남기지 않습니다.
 
+모든 등록 계정을 한 번에 검사하는 독립 collector는 콘텐츠 생성이나 게시 없이 다음 명령으로 실행합니다.
+
+```powershell
+node automation/run.mjs insights
+```
+
+collector는 `automation/accounts/index.mjs`에 등록된 계정을 순서대로 처리합니다. 한 계정의 오류는 다음 계정으로 격리되고, 게시물별 오류도 가능한 범위에서 나머지 게시물 처리를 막지 않습니다. 계정별 파일 잠금으로 수동 실행·preflight·예약 실행이 겹쳐도 같은 snapshot을 동시에 쓰지 않습니다. 실행 요약은 `automation/logs/insights-collector/YYYY-MM-DD.jsonl`에 기록하며 30일이 지난 collector 로그는 다음 실행 때 삭제합니다.
+
+Windows에서 매시간 자동 실행 작업을 등록하거나 갱신하려면 다음을 실행합니다. 작업은 현재 로그인한 사용자 세션에서 실행되고, 놓친 실행은 다음 기회에 시작하며, 이전 실행이 남아 있으면 새 인스턴스를 시작하지 않습니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File automation/register-insights-task.ps1
+```
+
 게시 후 24h, 72h, 7d 체크포인트를 순서대로 채우며 실제 `collected_at`과 `age_hours`를 함께 기록합니다. 24시간 전 최초 수집은 `initial`이며 24h로 가장하지 않습니다. 체크포인트가 아닌 `latest`는 기본 12시간 간격이고, 7d 체크포인트가 끝난 오래된 게시물은 반복 조회하지 않습니다.
 
 각 스냅샷에는 reach 기준 `like_rate`, `comment_rate`, `save_rate`, `share_rate`, `interaction_rate`를 저장합니다. reach가 0이거나 값이 없으면 비율은 `null`입니다. 카테고리 요약과 소표본 정책은 `automation/insights-summary.json`에 기록되어 다음 preflight의 `performance_context`로 전달됩니다.
