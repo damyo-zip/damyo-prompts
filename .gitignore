@@ -1,0 +1,9 @@
+.env
+
+# Kongi automation runtime artifacts and secrets
+automation/backups/
+automation/generated/
+automation/logs/
+automation/runs/
+automation/state.json
+

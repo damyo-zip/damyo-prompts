@@ -1,0 +1,11 @@
+{
+  "name": "damyo-prompts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "kongi:inspect": "node automation/kongi.mjs inspect",
+    "kongi:preflight": "node automation/kongi.mjs preflight",
+    "kongi:test": "node automation/kongi.mjs test"
+  }
+}
+
