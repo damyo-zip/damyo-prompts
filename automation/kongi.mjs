@@ -5,6 +5,7 @@ import {
   copyFile,
   mkdir,
   readFile,
+  readdir,
   rename,
   rm,
   stat,
@@ -14,6 +15,8 @@ import { spawnSync } from "node:child_process";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
+import kongiAccount from "./accounts/kongi.mjs";
+import hamnimiAccount from "./accounts/hamnimi.mjs";
 import {
   collectionPlan,
   deriveRates,
@@ -25,12 +28,40 @@ import {
 const automationDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = dirname(automationDir);
 const promptsPath = join(projectRoot, "prompts.js");
-const referencePath = join(automationDir, "reference", "kongi.png");
-const statePath = join(automationDir, "state.json");
-const runsDir = join(automationDir, "runs");
-const logsDir = join(automationDir, "logs");
-const backupsDir = join(automationDir, "backups");
+let accountConfig = kongiAccount;
+let referencePath;
+let statePath;
+let runsDir;
+let logsDir;
+let backupsDir;
+let postsDir;
+let insightsSummaryPath;
 const MAX_ATTEMPTS = 3;
+
+function configureAccount(config) {
+  accountConfig = config;
+  referencePath = join(automationDir, "reference", config.referenceFile);
+  statePath = join(automationDir, "state", `${config.accountKey}.json`);
+  runsDir = join(automationDir, "runs", config.accountKey);
+  logsDir = join(automationDir, "logs", config.accountKey);
+  backupsDir = join(automationDir, "backups", config.accountKey);
+  postsDir = join(automationDir, "posts", config.accountKey);
+  insightsSummaryPath = join(automationDir, "insights-summary", `${config.accountKey}.json`);
+}
+
+configureAccount(kongiAccount);
+
+function instagramCtaRelativePath() {
+  const value = String(accountConfig.instagramCtaImage || "").trim().replace(/\\/g, "/");
+  if (!value || value.startsWith("/") || /^[A-Za-z]:/.test(value) || /(^|\/)\.\.(\/|$)/.test(value)) {
+    throw new Error(`${accountConfig.displayName} Instagram CTA 이미지 경로 설정이 올바르지 않습니다.`);
+  }
+  return value;
+}
+
+function instagramCtaPath() {
+  return join(projectRoot, ...instagramCtaRelativePath().split("/"));
+}
 
 function hasFlag(name) {
   return process.argv.includes(name);
@@ -109,6 +140,61 @@ async function loadEnv() {
   }
 }
 
+function accountCredentials() {
+  const settings = accountConfig.instagram;
+  return {
+    userId: process.env[settings.userIdEnv] || (settings.legacyUserIdEnv ? process.env[settings.legacyUserIdEnv] : "") || "",
+    accessToken: process.env[settings.accessTokenEnv] || (settings.legacyAccessTokenEnv ? process.env[settings.legacyAccessTokenEnv] : "") || "",
+    userIdEnv: settings.userIdEnv,
+    accessTokenEnv: settings.accessTokenEnv,
+    usingLegacyFallback: Boolean(
+      settings.legacyAccessTokenEnv &&
+      !process.env[settings.accessTokenEnv] &&
+      process.env[settings.legacyAccessTokenEnv]
+    )
+  };
+}
+
+function insightsContext() {
+  const credentials = accountCredentials();
+  return {
+    accountKey: accountConfig.accountKey,
+    displayName: accountConfig.displayName,
+    postsDir,
+    statePath,
+    summaryPath: insightsSummaryPath,
+    accessToken: credentials.accessToken,
+    accessTokenEnv: credentials.accessTokenEnv
+  };
+}
+
+async function migrateLegacyKongiRuntime() {
+  if (accountConfig.accountKey !== "kongi") return;
+  const legacyStatePath = join(automationDir, "state.json");
+  const legacyPostsDir = join(automationDir, "posts");
+  const legacySummaryPath = join(automationDir, "insights-summary.json");
+  if (!(await exists(statePath)) && await exists(legacyStatePath)) {
+    await mkdir(dirname(statePath), { recursive: true });
+    await copyFile(legacyStatePath, statePath, fsConstants.COPYFILE_EXCL);
+  }
+  const migratedState = await readJson(statePath, null);
+  if (migratedState && !migratedState.account_key) {
+    await writeJson(statePath, { ...migratedState, account_key: "kongi" });
+  }
+  await mkdir(postsDir, { recursive: true });
+  if (await exists(legacyPostsDir)) {
+    for (const entry of await readdir(legacyPostsDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      const destination = join(postsDir, entry.name);
+      if (!(await exists(destination))) await copyFile(join(legacyPostsDir, entry.name), destination, fsConstants.COPYFILE_EXCL);
+    }
+  }
+  if (!(await exists(insightsSummaryPath)) && await exists(legacySummaryPath)) {
+    await mkdir(dirname(insightsSummaryPath), { recursive: true });
+    await copyFile(legacySummaryPath, insightsSummaryPath, fsConstants.COPYFILE_EXCL);
+  }
+}
+
 function runGit(args, { allowFailure = false } = {}) {
   const result = spawnSync("git", args, {
     cwd: projectRoot,
@@ -162,7 +248,7 @@ function nextPostId(prompts) {
   return `P-${String(max + 1).padStart(3, "0")}`;
 }
 
-function summarizeSite(prompts) {
+function summarizeSite(prompts, animal = accountConfig.animal) {
   const ids = prompts.map(item => item.id);
   const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
   return {
@@ -174,7 +260,7 @@ function summarizeSite(prompts) {
       animal,
       prompts.filter(item => getAnimal(item) === animal).length
     ])),
-    dogs: prompts.filter(item => getAnimal(item) === "dog").map(item => ({
+    account_posts: prompts.filter(item => getAnimal(item) === animal).map(item => ({
       id: item.id,
       title: item.title || "",
       category: item.category || "",
@@ -187,7 +273,7 @@ function summarizeSite(prompts) {
 async function appendLog(runId, stage, details = {}) {
   await mkdir(logsDir, { recursive: true });
   const day = new Date().toISOString().slice(0, 10);
-  const entry = { timestamp: new Date().toISOString(), run_id: runId, stage, ...details };
+  const entry = { timestamp: new Date().toISOString(), account_key: accountConfig.accountKey, run_id: runId, stage, ...details };
   await appendFile(join(logsDir, `${day}.jsonl`), `${JSON.stringify(entry)}\n`, "utf8");
 }
 
@@ -196,6 +282,7 @@ async function updateState(runId, stage, details = {}) {
   const next = {
     ...previous,
     ...details,
+    account_key: accountConfig.accountKey,
     run_id: runId,
     stage,
     updated_at: new Date().toISOString()
@@ -224,10 +311,14 @@ function assertCleanGit(snapshot, allowDevelopmentDirty) {
 
 async function commandInspect() {
   const { PROMPTS } = await readSiteData();
+  const ctaPath = instagramCtaPath();
   console.log(JSON.stringify({
+    account: accountConfig,
     project_root: projectRoot,
     reference_image: referencePath,
     reference_exists: await exists(referencePath),
+    instagram_cta_image: ctaPath,
+    instagram_cta_exists: await exists(ctaPath),
     git: gitSnapshot(),
     site: summarizeSite(PROMPTS)
   }, null, 2));
@@ -235,9 +326,12 @@ async function commandInspect() {
 
 async function commandPreflight() {
   const allowDevelopmentDirty = hasFlag("--development-dirty") && booleanValue(process.env.DRY_RUN, true);
+  const cta = await validateInstagramCtaImage();
+  const ctaImageUrl = publicAssetUrl(cta.relative_path);
+  await verifyPublicImage(ctaImageUrl);
   let performanceUpdate;
   try {
-    performanceUpdate = await updateInstagramInsights();
+    performanceUpdate = await updateInstagramInsights({ context: insightsContext() });
   } catch (error) {
     if (error.kind === "auth_invalid") throw error;
     performanceUpdate = { auth_status: "temporary_failure", error: error.message };
@@ -246,25 +340,30 @@ async function commandPreflight() {
 
   const snapshot = gitSnapshot();
   assertCleanGit(snapshot, allowDevelopmentDirty);
-  if (!(await exists(referencePath))) throw new Error(`콩이 기준 이미지가 없습니다: ${referencePath}`);
+  if (!(await exists(referencePath))) throw new Error(`${accountConfig.displayName} 기준 이미지가 없습니다: ${referencePath}`);
 
   const { PROMPTS } = await readSiteData();
   const site = summarizeSite(PROMPTS);
   if (site.duplicate_ids.length) throw new Error(`중복 ID가 있습니다: ${site.duplicate_ids.join(", ")}`);
 
   const previous = await readJson(statePath, null);
-  const runId = activeState(previous) ? previous.run_id : `${localTimestamp()}-${randomSuffix()}`;
+  const runId = activeState(previous) ? previous.run_id : `${accountConfig.accountKey}-${localTimestamp()}-${randomSuffix()}`;
   const postId = activeState(previous) ? previous.post_id : site.next_id;
   const runDir = join(runsDir, runId);
   await mkdir(runDir, { recursive: true });
   const payload = {
     run_id: runId,
+    account_key: accountConfig.accountKey,
+    display_name: accountConfig.displayName,
+    animal: accountConfig.animal,
     post_id: postId,
     run_dir: runDir,
     dry_run: booleanValue(process.env.DRY_RUN, true),
     baseline_commit: activeState(previous) ? previous.baseline_commit : snapshot.head,
     existing_count: site.count,
-    existing_dog_posts: site.dogs,
+    existing_account_posts: site.account_posts,
+    idea_guidance: accountConfig.ideaGuidance,
+    identity_guidance: accountConfig.identityGuidance,
     performance_context: performanceUpdate.summary || null,
     insights_update: {
       auth_status: performanceUpdate.auth_status,
@@ -280,10 +379,13 @@ async function commandPreflight() {
       guidance: performanceUpdate.summary.idea_selection?.guidance || null
     } : null,
     reference_image: referencePath,
+    instagram_cta_image: cta,
+    public_cta_image_url: ctaImageUrl,
     git: snapshot
   };
   await writeJson(join(runDir, "preflight.json"), payload);
   await updateState(runId, "preflight_complete", {
+    account_key: accountConfig.accountKey,
     post_id: postId,
     dry_run: payload.dry_run,
     baseline_commit: payload.baseline_commit,
@@ -306,7 +408,12 @@ function validateDraft(draft, expectedPostId) {
   if (expectedPostId && draft.post_id !== expectedPostId) {
     throw new Error(`초안 post_id(${draft.post_id})가 실행 ID의 post_id(${expectedPostId})와 다릅니다.`);
   }
-  if (/콩이/.test(draft.prompt)) throw new Error("공유용 prompt에는 특정 이름 '콩이'를 넣을 수 없습니다.");
+  if (draft.account_key && draft.account_key !== accountConfig.accountKey) {
+    throw new Error(`draft.account_key(${draft.account_key})가 현재 계정(${accountConfig.accountKey})과 다릅니다.`);
+  }
+  if (draft.prompt.includes(accountConfig.displayName)) {
+    throw new Error(`공유용 prompt에는 특정 이름 '${accountConfig.displayName}'를 넣을 수 없습니다.`);
+  }
   const requiredPatterns = [
     [/첨부한|사진 속/, "첨부 이미지 지시"],
     [/같은|동일/, "동일 개체 유지"],
@@ -335,6 +442,7 @@ function validateDraft(draft, expectedPostId) {
 
 function validateReview(review, runId) {
   if (review.run_id !== runId) throw new Error("review.run_id가 draft.run_id와 다릅니다.");
+  if (review.account_key && review.account_key !== accountConfig.accountKey) throw new Error("review.account_key가 현재 계정과 다릅니다.");
   if (!Number.isInteger(review.attempt) || review.attempt < 1 || review.attempt > MAX_ATTEMPTS) {
     throw new Error(`review.attempt는 1~${MAX_ATTEMPTS} 정수여야 합니다.`);
   }
@@ -377,10 +485,28 @@ async function imageMetadata(path) {
   throw new Error("지원하지 않거나 손상된 이미지입니다. PNG 또는 JPEG를 사용하세요.");
 }
 
+async function validateInstagramCtaImage() {
+  const relativePath = instagramCtaRelativePath();
+  const absolutePath = instagramCtaPath();
+  if (!(await exists(absolutePath))) {
+    throw new Error(`${accountConfig.displayName} Instagram CTA 이미지가 없어 게시를 중단함`);
+  }
+  let metadata;
+  try {
+    metadata = await imageMetadata(absolutePath);
+  } catch (error) {
+    throw new Error(`${accountConfig.displayName} Instagram CTA 이미지를 정상적으로 읽을 수 없어 게시를 중단함: ${error.message}`);
+  }
+  if (metadata.format !== "jpeg" || metadata.width !== 1080 || metadata.height !== 1350 || metadata.width / metadata.height !== 0.8) {
+    throw new Error(`${accountConfig.displayName} Instagram CTA 이미지 규격이 1080x1350 JPEG(4:5)가 아니어서 게시를 중단함: ${metadata.width}x${metadata.height} ${metadata.format}`);
+  }
+  return { relative_path: relativePath, absolute_path: absolutePath, ...metadata, ratio: 0.8 };
+}
+
 function makePost(draft, imageSrc) {
   return {
     id: draft.post_id,
-    animal: "dog",
+    animal: accountConfig.animal,
     title: draft.title.trim(),
     category: draft.category.trim(),
     cover: imageSrc,
@@ -395,7 +521,7 @@ function validateSite(prompts, post, previousCount, projectImageExists) {
   if (prompts.length !== previousCount + 1) throw new Error("기존 게시물 개수가 손상되었습니다.");
   if (prompts[0]?.id !== post.id) throw new Error("새 게시물이 PROMPTS 앞쪽에 추가되지 않았습니다.");
   if (prompts.filter(item => item.id === post.id).length !== 1) throw new Error("새 ID가 중복되었습니다.");
-  if (post.animal !== "dog") throw new Error("animal은 dog여야 합니다.");
+  if (post.animal !== accountConfig.animal) throw new Error(`animal은 ${accountConfig.animal}이어야 합니다.`);
   if (!post.cover || post.cover !== post.images?.[0]?.src) throw new Error("cover와 images[0].src가 일치하지 않습니다.");
   if (!projectImageExists) throw new Error("새 이미지 파일이 존재하지 않습니다.");
   return true;
@@ -426,6 +552,62 @@ function inferPublicBaseUrl() {
     : `https://${owner}.github.io/${repository}/`;
 }
 
+function publicAssetUrl(relativePath, baseUrl = inferPublicBaseUrl()) {
+  return new URL(relativePath.replace(/\\/g, "/"), baseUrl).href;
+}
+
+function buildInstagramCarouselPlan({ contentImageUrls, ctaImageUrl, caption, altText }) {
+  if (!Array.isArray(contentImageUrls) || contentImageUrls.length < 1) {
+    throw new Error("Instagram Carousel에는 콘텐츠 이미지가 한 장 이상 필요합니다.");
+  }
+  if (contentImageUrls.length > 9) {
+    throw new Error("CTA를 포함한 Instagram Carousel은 콘텐츠 이미지를 최대 9장까지 지원합니다.");
+  }
+  for (const [index, url] of [...contentImageUrls, ctaImageUrl].entries()) {
+    if (!/^https?:\/\//i.test(String(url || ""))) throw new Error(`Instagram Carousel ${index + 1}번 이미지의 공개 URL이 올바르지 않습니다.`);
+  }
+  const slides = [
+    ...contentImageUrls.map((imageUrl, index) => ({
+      role: "content",
+      label: `content_${index + 1}`,
+      image_url: imageUrl,
+      alt_text: contentImageUrls.length === 1 ? altText : `${altText} (${index + 1}/${contentImageUrls.length})`
+    })),
+    {
+      role: "cta",
+      label: `cta_${accountConfig.accountKey}`,
+      account_key: accountConfig.accountKey,
+      image_url: ctaImageUrl,
+      alt_text: `${accountConfig.displayName} Instagram 프로필 방문 안내 이미지`
+    }
+  ];
+  return {
+    account_key: accountConfig.accountKey,
+    child_order: slides.map(slide => slide.label),
+    final_slide: slides.at(-1).label,
+    child_container_requests: slides.map(slide => ({
+      method: "POST",
+      endpoint: "/{ig_user_id}/media",
+      role: slide.role,
+      body: { image_url: slide.image_url, is_carousel_item: "true", alt_text: slide.alt_text }
+    })),
+    carousel_container_request: {
+      method: "POST",
+      endpoint: "/{ig_user_id}/media",
+      body: {
+        media_type: "CAROUSEL",
+        children: slides.map((_, index) => `{{child_${index + 1}_container_id}}`).join(","),
+        caption
+      }
+    },
+    publish_request: {
+      method: "POST",
+      endpoint: "/{ig_user_id}/media_publish",
+      body: { creation_id: "{{carousel_container_id}}" }
+    }
+  };
+}
+
 async function verifyPublicImage(imageUrl) {
   const attempts = Math.max(1, Math.min(12, Number(process.env.DEPLOY_VERIFY_ATTEMPTS || 6)));
   const interval = Math.max(1000, Math.min(10000, Number(process.env.DEPLOY_VERIFY_INTERVAL_MS || 10000)));
@@ -443,14 +625,14 @@ async function verifyPublicImage(imageUrl) {
   throw new Error(`공개 이미지 URL 검증 실패 (${last}): ${imageUrl}`);
 }
 
-async function metaRequest(path, { method = "GET", body } = {}) {
+async function metaRequest(path, { method = "GET", body, accessToken = accountCredentials().accessToken } = {}) {
   const base = (process.env.META_GRAPH_BASE_URL || "https://graph.instagram.com").replace(/\/$/, "");
   const version = process.env.META_API_VERSION;
   if (!/^v\d+\.\d+$/.test(version || "")) throw new Error("META_API_VERSION 형식이 올바르지 않습니다.");
   const url = `${base}/${version}/${path.replace(/^\//, "")}`;
   const response = await fetch(url, {
     method,
-    headers: { Authorization: `Bearer ${process.env.INSTAGRAM_ACCESS_TOKEN}` },
+    headers: { Authorization: `Bearer ${accessToken}` },
     body: body ? new URLSearchParams(body) : undefined,
     signal: AbortSignal.timeout(30000)
   });
@@ -462,42 +644,92 @@ async function metaRequest(path, { method = "GET", body } = {}) {
   return payload;
 }
 
-async function publishInstagram({ imageUrl, caption, altText }) {
-  const igUserId = process.env.INSTAGRAM_USER_ID;
-  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
-  if (!igUserId || !token || !process.env.META_API_VERSION) {
-    return { configured: false, missing: [
-      !igUserId && "INSTAGRAM_USER_ID",
-      !token && "INSTAGRAM_ACCESS_TOKEN",
-      !process.env.META_API_VERSION && "META_API_VERSION"
-    ].filter(Boolean) };
-  }
-
-  const container = await metaRequest(`${encodeURIComponent(igUserId)}/media`, {
-    method: "POST",
-    body: { image_url: imageUrl, caption, alt_text: altText }
-  });
-  if (!container.id) throw new Error("Meta media container ID가 없습니다.");
-
+async function waitForMetaContainer(containerId, accessToken) {
   for (let attempt = 1; attempt <= 5; attempt += 1) {
-    const status = await metaRequest(`${encodeURIComponent(container.id)}?fields=status_code`);
-    if (["FINISHED", "PUBLISHED"].includes(status.status_code)) break;
+    const status = await metaRequest(`${encodeURIComponent(containerId)}?fields=status_code`, { accessToken });
+    if (["FINISHED", "PUBLISHED"].includes(status.status_code)) return status.status_code;
     if (["ERROR", "EXPIRED"].includes(status.status_code)) throw new Error(`Meta container 상태: ${status.status_code}`);
     if (attempt === 5) throw new Error(`Meta container 준비 시간 초과: ${status.status_code || "unknown"}`);
     await new Promise(resolveDelay => setTimeout(resolveDelay, 5000));
   }
+  throw new Error("Meta container 준비 상태를 확인하지 못했습니다.");
+}
+
+async function publishInstagramCarousel({
+  contentImageUrls,
+  ctaImageUrl,
+  caption,
+  altText,
+  existingContainerId = null,
+  existingChildContainerIds = [],
+  onContainerCreated = null
+}) {
+  const credentials = accountCredentials();
+  const igUserId = credentials.userId;
+  const token = credentials.accessToken;
+  if (!igUserId || !token || !process.env.META_API_VERSION) {
+    return { configured: false, missing: [
+      !igUserId && credentials.userIdEnv,
+      !token && credentials.accessTokenEnv,
+      !process.env.META_API_VERSION && "META_API_VERSION"
+    ].filter(Boolean) };
+  }
+
+  const plan = buildInstagramCarouselPlan({ contentImageUrls, ctaImageUrl, caption, altText });
+  let childContainerIds = [...existingChildContainerIds];
+  let containerId = existingContainerId;
+  if (!containerId) {
+    childContainerIds = [];
+    for (const request of plan.child_container_requests) {
+      const child = await metaRequest(`${encodeURIComponent(igUserId)}/media`, {
+        method: "POST",
+        body: request.body,
+        accessToken: token
+      });
+      if (!child.id) throw new Error(`Meta ${request.role} child container ID가 없습니다.`);
+      await waitForMetaContainer(child.id, token);
+      childContainerIds.push(child.id);
+    }
+
+    const container = await metaRequest(`${encodeURIComponent(igUserId)}/media`, {
+      method: "POST",
+      body: { media_type: "CAROUSEL", children: childContainerIds.join(","), caption },
+      accessToken: token
+    });
+    if (!container.id) throw new Error("Meta Carousel container ID가 없습니다.");
+    containerId = container.id;
+    if (onContainerCreated) await onContainerCreated({
+      child_container_ids: childContainerIds,
+      container_id: containerId,
+      child_order: plan.child_order
+    });
+  }
+
+  const parentStatus = await waitForMetaContainer(containerId, token);
+  if (parentStatus === "PUBLISHED") {
+    throw new Error("저장된 Meta Carousel container가 이미 PUBLISHED 상태이므로 중복 게시를 막기 위해 media_publish를 중단함");
+  }
 
   const published = await metaRequest(`${encodeURIComponent(igUserId)}/media_publish`, {
     method: "POST",
-    body: { creation_id: container.id }
+    body: { creation_id: containerId },
+    accessToken: token
   });
   if (!published.id) throw new Error("Instagram media ID가 없습니다.");
-  return { configured: true, container_id: container.id, media_id: published.id };
+  return {
+    configured: true,
+    child_container_ids: childContainerIds,
+    container_id: containerId,
+    media_id: published.id,
+    child_order: plan.child_order
+  };
 }
 
 async function continuePublishedRun(draft, state) {
   const numericId = draft.post_id.slice(2);
   const imageSrc = state.image_src || `images/p${numericId}-01.jpg`;
+  const cta = await validateInstagramCtaImage();
+  const ctaImageUrl = publicAssetUrl(cta.relative_path);
   let current = state;
 
   if (current.stage === "site_validated") {
@@ -525,21 +757,45 @@ async function continuePublishedRun(draft, state) {
   }
 
   if (current.stage === "git_pushed") {
-    const imageUrl = new URL(imageSrc, inferPublicBaseUrl()).href;
+    const imageUrl = publicAssetUrl(imageSrc);
     await verifyPublicImage(imageUrl);
+    await verifyPublicImage(ctaImageUrl);
     current = await updateState(draft.run_id, "deployment_verified", {
       post_id: draft.post_id,
       image_src: imageSrc,
       git_commit: current.git_commit,
-      public_image_url: imageUrl
+      public_image_url: imageUrl,
+      public_content_image_urls: [imageUrl],
+      public_cta_image_url: ctaImageUrl,
+      instagram_cta_path: cta.relative_path
     });
   }
 
   if (["deployment_verified", "awaiting_meta_credentials"].includes(current.stage)) {
-    const instagram = await publishInstagram({
-      imageUrl: current.public_image_url,
+    const contentImageUrls = current.public_content_image_urls || [current.public_image_url];
+    const currentCtaImageUrl = current.public_cta_image_url || ctaImageUrl;
+    if (!current.public_cta_image_url) {
+      await verifyPublicImage(currentCtaImageUrl);
+      current = await updateState(draft.run_id, current.stage, {
+        public_content_image_urls: contentImageUrls,
+        public_cta_image_url: currentCtaImageUrl,
+        instagram_cta_path: cta.relative_path
+      });
+    }
+    const instagram = await publishInstagramCarousel({
+      contentImageUrls,
+      ctaImageUrl: currentCtaImageUrl,
       caption: draft.caption,
-      altText: draft.alt_text
+      altText: draft.alt_text,
+      existingContainerId: current.instagram_carousel_container_id || null,
+      existingChildContainerIds: current.instagram_child_container_ids || [],
+      onContainerCreated: async containers => {
+        current = await updateState(draft.run_id, current.stage, {
+          instagram_child_container_ids: containers.child_container_ids,
+          instagram_carousel_container_id: containers.container_id,
+          instagram_child_order: containers.child_order
+        });
+      }
     });
     if (!instagram.configured) {
       const waiting = await updateState(draft.run_id, "awaiting_meta_credentials", {
@@ -547,6 +803,9 @@ async function continuePublishedRun(draft, state) {
         image_src: imageSrc,
         git_commit: current.git_commit,
         public_image_url: current.public_image_url,
+        public_content_image_urls: contentImageUrls,
+        public_cta_image_url: currentCtaImageUrl,
+        instagram_cta_path: cta.relative_path,
         missing_meta_settings: instagram.missing
       });
       console.log(JSON.stringify({
@@ -564,11 +823,17 @@ async function continuePublishedRun(draft, state) {
       image_src: imageSrc,
       git_commit: current.git_commit,
       public_image_url: current.public_image_url,
+      public_content_image_urls: contentImageUrls,
+      public_cta_image_url: currentCtaImageUrl,
+      instagram_cta_path: cta.relative_path,
+      instagram_child_container_ids: instagram.child_container_ids,
+      instagram_child_order: instagram.child_order,
+      instagram_carousel_container_id: instagram.container_id,
       instagram_container_id: instagram.container_id,
       instagram_media_id: instagram.media_id
     });
     try {
-      await savePublishedPostMetadata({ draft, state: published });
+      await savePublishedPostMetadata({ draft, state: published, context: insightsContext() });
     } catch (metadataError) {
       await appendLog(draft.run_id, "metadata_save_failed", { error: metadataError.message });
     }
@@ -596,8 +861,9 @@ async function commandComplete() {
   const review = await readJson(reviewPath);
   const state = await readJson(statePath);
   if (!draft || !review || !state) throw new Error("초안, 검수, 실행 상태를 읽지 못했습니다.");
+  if (state.account_key && state.account_key !== accountConfig.accountKey) throw new Error("현재 state가 다른 계정에 속합니다.");
   if (state.stage === "instagram_published" && state.run_id === draft.run_id) {
-    await savePublishedPostMetadata({ draft, state });
+    await savePublishedPostMetadata({ draft, state, context: insightsContext() });
     console.log(JSON.stringify({ skipped: true, reason: "already_published", instagram_media_id: state.instagram_media_id }, null, 2));
     return;
   }
@@ -613,6 +879,7 @@ async function commandComplete() {
     throw new Error(review.attempt >= MAX_ATTEMPTS ? "세 번의 이미지 검수 실패" : "이미지 검수 임계값 미달: 재생성이 필요합니다.");
   }
 
+  const cta = await validateInstagramCtaImage();
   const metadata = await imageMetadata(imagePath);
   const ratio = metadata.width / metadata.height;
   if (Math.abs(ratio - 0.8) > 0.02) throw new Error(`이미지 비율이 4:5가 아닙니다: ${metadata.width}x${metadata.height}`);
@@ -623,6 +890,8 @@ async function commandComplete() {
   }
   const numericId = draft.post_id.slice(2);
   const imageSrc = `images/p${numericId}-01.jpg`;
+  const publicContentImageUrl = publicAssetUrl(imageSrc);
+  const publicCtaImageUrl = publicAssetUrl(cta.relative_path);
   const post = makePost(draft, imageSrc);
   const { source, PROMPTS } = await readSiteData();
   if (nextPostId(PROMPTS) !== draft.post_id) throw new Error("실행 중 다음 게시물 ID가 변경되었습니다. 새 preflight가 필요합니다.");
@@ -638,13 +907,20 @@ async function commandComplete() {
       dry_run: true,
       post,
       image: { source: imagePath, ...metadata, ratio },
+      instagram_carousel: buildInstagramCarouselPlan({
+        contentImageUrls: [publicContentImageUrl],
+        ctaImageUrl: publicCtaImageUrl,
+        caption: draft.caption,
+        altText: draft.alt_text
+      }),
+      instagram_cta_image: cta,
       review,
       validation: {
         javascript_syntax: true,
         prompts_array: true,
         unique_id: true,
         cover_matches_first_image: true,
-        animal_is_dog: true,
+        animal_matches_account: true,
         existing_count_preserved: true,
         site_unchanged: true,
         git_unchanged: true,
@@ -690,16 +966,44 @@ async function commandComplete() {
     await updateState(draft.run_id, "git_pushed", { post_id: draft.post_id, git_commit: commit });
 
     const baseUrl = inferPublicBaseUrl();
-    const imageUrl = new URL(imageSrc, baseUrl).href;
+    const imageUrl = publicAssetUrl(imageSrc, baseUrl);
+    const ctaImageUrl = publicAssetUrl(cta.relative_path, baseUrl);
     await verifyPublicImage(imageUrl);
-    await updateState(draft.run_id, "deployment_verified", { post_id: draft.post_id, git_commit: commit, public_image_url: imageUrl });
+    await verifyPublicImage(ctaImageUrl);
+    await updateState(draft.run_id, "deployment_verified", {
+      post_id: draft.post_id,
+      git_commit: commit,
+      public_image_url: imageUrl,
+      public_content_image_urls: [imageUrl],
+      public_cta_image_url: ctaImageUrl,
+      instagram_cta_path: cta.relative_path
+    });
 
-    const instagram = await publishInstagram({ imageUrl, caption: draft.caption, altText: draft.alt_text });
+    const instagram = await publishInstagramCarousel({
+      contentImageUrls: [imageUrl],
+      ctaImageUrl,
+      caption: draft.caption,
+      altText: draft.alt_text,
+      onContainerCreated: async containers => updateState(draft.run_id, "deployment_verified", {
+        post_id: draft.post_id,
+        git_commit: commit,
+        public_image_url: imageUrl,
+        public_content_image_urls: [imageUrl],
+        public_cta_image_url: ctaImageUrl,
+        instagram_cta_path: cta.relative_path,
+        instagram_child_container_ids: containers.child_container_ids,
+        instagram_carousel_container_id: containers.container_id,
+        instagram_child_order: containers.child_order
+      })
+    });
     if (!instagram.configured) {
       await updateState(draft.run_id, "awaiting_meta_credentials", {
         post_id: draft.post_id,
         git_commit: commit,
         public_image_url: imageUrl,
+        public_content_image_urls: [imageUrl],
+        public_cta_image_url: ctaImageUrl,
+        instagram_cta_path: cta.relative_path,
         missing_meta_settings: instagram.missing
       });
       console.log(JSON.stringify({ site_published: true, instagram_published: false, missing_meta_settings: instagram.missing, git_commit: commit, public_image_url: imageUrl }, null, 2));
@@ -709,11 +1013,17 @@ async function commandComplete() {
       post_id: draft.post_id,
       git_commit: commit,
       public_image_url: imageUrl,
+      public_content_image_urls: [imageUrl],
+      public_cta_image_url: ctaImageUrl,
+      instagram_cta_path: cta.relative_path,
+      instagram_child_container_ids: instagram.child_container_ids,
+      instagram_child_order: instagram.child_order,
+      instagram_carousel_container_id: instagram.container_id,
       instagram_container_id: instagram.container_id,
       instagram_media_id: instagram.media_id
     });
     try {
-      await savePublishedPostMetadata({ draft, state: published });
+      await savePublishedPostMetadata({ draft, state: published, context: insightsContext() });
     } catch (metadataError) {
       await appendLog(draft.run_id, "metadata_save_failed", { error: metadataError.message });
     }
@@ -730,6 +1040,8 @@ async function commandComplete() {
       await copyFile(backupPrompts, promptsPath);
       await rm(finalImagePath, { force: true });
       await updateState(draft.run_id, "failed", { post_id: draft.post_id, reason: error.message, rolled_back: true });
+    } else if (commitCreated) {
+      await appendLog(draft.run_id, "recoverable_failure", { reason: error.message, rolled_back: false });
     } else {
       await updateState(draft.run_id, "failed", { post_id: draft.post_id, reason: error.message, rolled_back: false });
     }
@@ -748,7 +1060,7 @@ async function commandFail() {
 }
 
 async function commandInsights() {
-  const result = await updateInstagramInsights();
+  const result = await updateInstagramInsights({ context: insightsContext() });
   await appendLog("insights-update", "insights_updated", {
     auth_status: result.auth_status,
     checked_posts: result.checked_posts,
@@ -759,19 +1071,41 @@ async function commandInsights() {
   if (result.auth_status === "permission_missing") process.exitCode = 1;
 }
 
+async function commandCtaCheck() {
+  const cta = await validateInstagramCtaImage();
+  const contentImageUrl = option("--content-url") || publicAssetUrl("images/dry-run-content.jpg");
+  const ctaImageUrl = publicAssetUrl(cta.relative_path);
+  const plan = buildInstagramCarouselPlan({
+    contentImageUrls: [contentImageUrl],
+    ctaImageUrl,
+    caption: option("--caption", "DRY RUN caption"),
+    altText: option("--alt-text", "DRY RUN content image")
+  });
+  console.log(JSON.stringify({
+    dry_run: true,
+    meta_requests_sent: false,
+    content_image_urls: [contentImageUrl],
+    cta_image_url: ctaImageUrl,
+    cta_image: cta,
+    ...plan
+  }, null, 2));
+}
+
 async function commandTest() {
   const { PROMPTS, source } = await readSiteData();
-  const summary = summarizeSite(PROMPTS);
+  const summary = summarizeSite(PROMPTS, accountConfig.animal);
   const failures = [];
   if (!PROMPTS.length) failures.push("PROMPTS가 비어 있음");
   if (summary.duplicate_ids.length) failures.push(`중복 ID: ${summary.duplicate_ids.join(", ")}`);
   if (!/^P-\d{3,}$/.test(summary.next_id)) failures.push("다음 ID 형식 오류");
-  if (!(await exists(referencePath))) failures.push("콩이 기준 이미지 없음");
+  if (!(await exists(referencePath))) failures.push(`${accountConfig.displayName} 기준 이미지 없음`);
   try { parsePromptsSource(source); } catch (error) { failures.push(`JavaScript 파싱 실패: ${error.message}`); }
   for (const item of PROMPTS) {
     if (!item.id || !item.title || !item.category) failures.push(`${item.id || "unknown"}: 필수 데이터 누락`);
     const cover = item.cover || item.image;
     if (cover && !(await exists(join(projectRoot, ...cover.split("/"))))) failures.push(`${item.id}: 이미지 없음 ${cover}`);
+    const siteImages = [cover, ...(item.images || []).map(image => image?.src)].filter(Boolean);
+    if (siteImages.includes(instagramCtaRelativePath())) failures.push(`${item.id}: 사이트 게시물에 Instagram CTA가 포함됨`);
   }
   const passingReview = validateReview({ run_id: "test", attempt: 1, identity_score: 75, visual_quality_score: 80, concept_score: 80, fatal_issue: false, notes: "threshold" }, "test");
   if (!passingReview.passed) failures.push("검수 임계값 경계 테스트 실패");
@@ -798,21 +1132,94 @@ async function commandTest() {
   if (collectionPlan({ published_at: oldPublishedAt, insights: { snapshots: [snapshot24h, snapshot72h] } }, fixedNow)?.checkpoint !== "7d") failures.push("Insights 7d checkpoint 테스트 실패");
   const recentLatest = { collected_at: new Date(fixedNow.getTime() - 2 * 3_600_000).toISOString(), checkpoint: null };
   if (collectionPlan({ published_at: publishedAt, insights: { snapshots: [snapshot24h, snapshot72h, recentLatest] } }, fixedNow) !== null) failures.push("Insights 12시간 중복 방지 테스트 실패");
-  const result = { passed: failures.length === 0, failures, site: summary };
+  const syntheticPost = makePost({ post_id: "P-999", title: "test", category: "test", description: "test", prompt: "test" }, "images/test.jpg");
+  if (syntheticPost.animal !== accountConfig.animal) failures.push("계정 animal mapping 테스트 실패");
+  const ctaRelativePath = instagramCtaRelativePath();
+  const otherAccount = accountConfig.accountKey === "kongi" ? hamnimiAccount : kongiAccount;
+  if (ctaRelativePath === otherAccount.instagramCtaImage) failures.push("계정별 CTA 경로 분리 테스트 실패");
+  const carouselDryRun = buildInstagramCarouselPlan({
+    contentImageUrls: ["https://example.test/content-1.jpg", "https://example.test/content-2.jpg"],
+    ctaImageUrl: publicAssetUrl(ctaRelativePath),
+    caption: "DRY RUN caption",
+    altText: "DRY RUN content"
+  });
+  if (carouselDryRun.child_order.join(",") !== `content_1,content_2,cta_${accountConfig.accountKey}`) failures.push("Carousel 콘텐츠→CTA 순서 테스트 실패");
+  if (carouselDryRun.final_slide !== `cta_${accountConfig.accountKey}`) failures.push("Carousel 최종 CTA 계정 mapping 테스트 실패");
+  if (carouselDryRun.child_container_requests.some(request => request.body.is_carousel_item !== "true")) failures.push("Carousel child is_carousel_item 테스트 실패");
+  if (carouselDryRun.child_container_requests.some(request => Object.hasOwn(request.body, "caption"))) failures.push("Carousel caption child 분리 테스트 실패");
+  if (carouselDryRun.carousel_container_request.body.media_type !== "CAROUSEL") failures.push("Carousel parent payload 테스트 실패");
+  if (carouselDryRun.carousel_container_request.body.caption !== "DRY RUN caption") failures.push("Carousel parent caption 테스트 실패");
+  if (carouselDryRun.child_container_requests.at(-1).body.image_url !== publicAssetUrl(ctaRelativePath)) failures.push("Carousel 최종 CTA URL 테스트 실패");
+  if (syntheticPost.images.some(image => image.src === ctaRelativePath)) failures.push("사이트 CTA 분리 테스트 실패");
+  const maximumCarousel = buildInstagramCarouselPlan({
+    contentImageUrls: Array.from({ length: 9 }, (_, index) => `https://example.test/content-${index + 1}.jpg`),
+    ctaImageUrl: publicAssetUrl(ctaRelativePath),
+    caption: "maximum",
+    altText: "maximum"
+  });
+  if (maximumCarousel.child_container_requests.length !== 10 || maximumCarousel.final_slide !== `cta_${accountConfig.accountKey}`) failures.push("Carousel 9개 콘텐츠+CTA 상한 테스트 실패");
+  try {
+    buildInstagramCarouselPlan({
+      contentImageUrls: Array.from({ length: 10 }, (_, index) => `https://example.test/content-${index + 1}.jpg`),
+      ctaImageUrl: publicAssetUrl(ctaRelativePath),
+      caption: "overflow",
+      altText: "overflow"
+    });
+    failures.push("Carousel 10개 콘텐츠 상한 차단 테스트 실패");
+  } catch (error) {
+    if (!error.message.includes("최대 9장")) failures.push("Carousel 상한 오류 메시지 테스트 실패");
+  }
+  const credentials = accountCredentials();
+  if (accountConfig.accountKey === "kongi" && process.env.INSTAGRAM_ACCESS_TOKEN && !credentials.accessToken) failures.push("콩이 legacy credential fallback 테스트 실패");
+  if (accountConfig.accountKey === "kongi") {
+    const p040 = await readJson(join(postsDir, "p-040.json"), null);
+    if (!p040 || p040.post_id !== "P-040" || p040.instagram_media_id !== "18094000493454257") failures.push("P-040 metadata migration 테스트 실패");
+  }
+  const result = {
+    passed: failures.length === 0,
+    failures,
+    account: {
+      account_key: accountConfig.accountKey,
+      display_name: accountConfig.displayName,
+      animal: accountConfig.animal,
+      reference_exists: await exists(referencePath),
+      instagram_cta_path: ctaRelativePath,
+      instagram_cta_exists: await exists(instagramCtaPath()),
+      credentials_configured: Boolean(credentials.userId && credentials.accessToken),
+      using_legacy_credential_fallback: credentials.usingLegacyFallback
+    },
+    site: summary,
+    carousel_dry_run: {
+      meta_requests_sent: false,
+      content_image_urls: carouselDryRun.child_container_requests.filter(request => request.role === "content").map(request => request.body.image_url),
+      cta_image_url: carouselDryRun.child_container_requests.at(-1).body.image_url,
+      child_order: carouselDryRun.child_order,
+      final_slide: carouselDryRun.final_slide,
+      child_payloads: carouselDryRun.child_container_requests.map(request => request.body),
+      carousel_payload: carouselDryRun.carousel_container_request.body,
+      publish_payload: carouselDryRun.publish_request.body
+    }
+  };
   console.log(JSON.stringify(result, null, 2));
   if (failures.length) process.exitCode = 1;
 }
 
-async function main() {
+async function runForAccount(config, command = "inspect") {
+  configureAccount(config);
   await loadEnv();
-  const command = process.argv[2] || "inspect";
+  await migrateLegacyKongiRuntime();
   if (command === "inspect") return commandInspect();
   if (command === "preflight") return commandPreflight();
   if (command === "complete") return commandComplete();
   if (command === "insights") return commandInsights();
+  if (command === "cta-check") return commandCtaCheck();
   if (command === "fail") return commandFail();
   if (command === "test") return commandTest();
   throw new Error(`알 수 없는 명령: ${command}`);
+}
+
+async function main() {
+  return runForAccount(kongiAccount, process.argv[2] || "inspect");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
@@ -823,9 +1230,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 }
 
 export {
+  buildInstagramCarouselPlan,
   imageMetadata,
   nextPostId,
   parsePromptsSource,
+  runForAccount,
   summarizeSite,
   commandInsights,
   validateDraft,

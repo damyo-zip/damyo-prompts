@@ -6,5 +6,7 @@ automation/generated/
 automation/logs/
 automation/posts/
 automation/runs/
+automation/state/
 automation/state.json
+automation/insights-summary/
 automation/insights-summary.json

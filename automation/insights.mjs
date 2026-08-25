@@ -29,13 +29,26 @@ async function writeJson(path, value) {
   await rename(temporary, path);
 }
 
-function postPath(postId) {
-  return join(postsDir, `${String(postId).toLowerCase().replace(/[^a-z0-9-]/g, "-")}.json`);
+function resolveContext(context = {}) {
+  return {
+    accountKey: context.accountKey || "kongi",
+    displayName: context.displayName || "콩이",
+    postsDir: context.postsDir || postsDir,
+    statePath: context.statePath || statePath,
+    summaryPath: context.summaryPath || summaryPath,
+    accessToken: context.accessToken ?? process.env.INSTAGRAM_ACCESS_TOKEN ?? "",
+    accessTokenEnv: context.accessTokenEnv || "INSTAGRAM_ACCESS_TOKEN"
+  };
 }
 
-function sanitizeMessage(message) {
+function postPath(postId, context = {}) {
+  const resolved = resolveContext(context);
+  return join(resolved.postsDir, `${String(postId).toLowerCase().replace(/[^a-z0-9-]/g, "-")}.json`);
+}
+
+function sanitizeMessage(message, accessToken = "") {
   let result = String(message || "unknown error");
-  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
+  const token = accessToken || process.env.INSTAGRAM_ACCESS_TOKEN;
   if (token) result = result.split(token).join("[REDACTED]");
   return result.replace(/access_token=[^&\s]+/gi, "access_token=[REDACTED]");
 }
@@ -90,9 +103,9 @@ function collectionPlan(post, now = new Date(), minimumHours = 12) {
   return null;
 }
 
-function classifyMetaError(error, status) {
+function classifyMetaError(error, status, accessToken) {
   const code = Number(error?.code || 0);
-  const message = sanitizeMessage(error?.message || `HTTP ${status}`);
+  const message = sanitizeMessage(error?.message || `HTTP ${status}`, accessToken);
   if (code === 190 || code === 102 || /expired|invalid.*token|oauth.*token|access token/i.test(message)) {
     return { status: "auth_error", code, message };
   }
@@ -105,7 +118,8 @@ function classifyMetaError(error, status) {
   return { status: "error", value: null, code: code || status, message };
 }
 
-async function fetchMetric(mediaId, metric) {
+async function fetchMetric(mediaId, metric, context = {}) {
+  const resolved = resolveContext(context);
   const base = (process.env.META_GRAPH_BASE_URL || "https://graph.instagram.com").replace(/\/$/, "");
   const version = process.env.META_API_VERSION;
   if (!/^v\d+\.\d+$/.test(version || "")) throw new Error("META_API_VERSION 형식이 올바르지 않습니다.");
@@ -113,53 +127,65 @@ async function fetchMetric(mediaId, metric) {
   url.searchParams.set("metric", metric);
   try {
     const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${process.env.INSTAGRAM_ACCESS_TOKEN}` },
+      headers: { Authorization: `Bearer ${resolved.accessToken}` },
       signal: AbortSignal.timeout(20_000)
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.error) return classifyMetaError(payload.error, response.status);
+    if (!response.ok || payload.error) return classifyMetaError(payload.error, response.status, resolved.accessToken);
     const item = Array.isArray(payload.data) ? payload.data[0] : null;
     let value = null;
     if (item?.total_value && Object.hasOwn(item.total_value, "value")) value = item.total_value.value;
     else if (Array.isArray(item?.values) && item.values.length) value = item.values.at(-1)?.value ?? null;
     return { status: "ok", value: typeof value === "number" ? value : null };
   } catch (error) {
-    return { status: "error", value: null, code: "network", message: sanitizeMessage(error.message) };
+    return { status: "error", value: null, code: "network", message: sanitizeMessage(error.message, resolved.accessToken) };
   }
 }
 
-async function collectMetrics(mediaId) {
+async function collectMetrics(mediaId, context = {}) {
   const metrics = {};
-  for (const metric of METRICS) metrics[metric] = await fetchMetric(mediaId, metric);
+  for (const metric of METRICS) metrics[metric] = await fetchMetric(mediaId, metric, context);
   return metrics;
 }
 
-async function metadataFromCurrentState() {
-  const state = await readJson(statePath, null);
+async function metadataFromCurrentState(context = {}) {
+  const resolved = resolveContext(context);
+  const state = await readJson(resolved.statePath, null);
   if (!state?.post_id || !state?.instagram_media_id || state.stage !== "instagram_published") return null;
   const draft = state.run_dir ? await readJson(join(state.run_dir, "draft.json"), {}) : {};
   return {
+    account_key: resolved.accountKey,
     post_id: state.post_id,
     title: draft.title || state.title || "",
     idea_category: draft.idea_category || draft.category || "미분류",
     idea_summary: draft.idea_summary || draft.description || "",
     published_at: state.updated_at,
     instagram_media_id: state.instagram_media_id,
+    instagram_media_type: state.public_cta_image_url ? "CAROUSEL" : null,
     git_commit: state.git_commit || null,
     public_image_url: state.public_image_url || null,
+    public_content_image_urls: state.public_content_image_urls || (state.public_image_url ? [state.public_image_url] : []),
+    public_cta_image_url: state.public_cta_image_url || null,
     insights: { snapshots: [] }
   };
 }
 
-async function listPosts() {
-  await mkdir(postsDir, { recursive: true });
-  const current = await metadataFromCurrentState();
-  if (current && !(await readJson(postPath(current.post_id), null))) await writeJson(postPath(current.post_id), current);
-  const files = (await readdir(postsDir)).filter(name => name.endsWith(".json"));
+async function listPosts(context = {}) {
+  const resolved = resolveContext(context);
+  await mkdir(resolved.postsDir, { recursive: true });
+  const current = await metadataFromCurrentState(resolved);
+  if (current && !(await readJson(postPath(current.post_id, resolved), null))) await writeJson(postPath(current.post_id, resolved), current);
+  const files = (await readdir(resolved.postsDir)).filter(name => name.endsWith(".json"));
   const posts = [];
   for (const file of files) {
-    const post = await readJson(join(postsDir, file), null);
-    if (post?.post_id && post?.instagram_media_id && post?.published_at) posts.push(post);
+    const post = await readJson(join(resolved.postsDir, file), null);
+    if (!post?.post_id || !post?.instagram_media_id || !post?.published_at) continue;
+    if (post.account_key && post.account_key !== resolved.accountKey) continue;
+    if (!post.account_key) {
+      post.account_key = resolved.accountKey;
+      await writeJson(join(resolved.postsDir, file), post);
+    }
+    posts.push(post);
   }
   return posts.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
 }
@@ -218,38 +244,44 @@ function buildSummary(posts) {
   };
 }
 
-async function savePublishedPostMetadata({ draft, state }) {
-  const path = postPath(draft.post_id);
+async function savePublishedPostMetadata({ draft, state, context = {} }) {
+  const resolved = resolveContext(context);
+  const path = postPath(draft.post_id, resolved);
   const previous = await readJson(path, {});
   const metadata = {
     ...previous,
+    account_key: resolved.accountKey,
     post_id: draft.post_id,
     title: draft.title,
     idea_category: draft.idea_category || draft.category || "미분류",
     idea_summary: draft.idea_summary || draft.description || "",
     published_at: previous.published_at || state.updated_at || new Date().toISOString(),
     instagram_media_id: state.instagram_media_id,
+    instagram_media_type: state.public_cta_image_url ? "CAROUSEL" : previous.instagram_media_type || null,
     git_commit: state.git_commit || null,
     public_image_url: state.public_image_url || null,
+    public_content_image_urls: state.public_content_image_urls || (state.public_image_url ? [state.public_image_url] : []),
+    public_cta_image_url: state.public_cta_image_url || null,
     insights: previous.insights || { snapshots: [] }
   };
   await writeJson(path, metadata);
   return path;
 }
 
-async function updateInstagramInsights({ now = new Date() } = {}) {
+async function updateInstagramInsights({ now = new Date(), context = {} } = {}) {
+  const resolved = resolveContext(context);
   const missing = [
-    !process.env.INSTAGRAM_ACCESS_TOKEN && "INSTAGRAM_ACCESS_TOKEN",
+    !resolved.accessToken && resolved.accessTokenEnv,
     !process.env.META_API_VERSION && "META_API_VERSION"
   ].filter(Boolean);
   if (missing.length) {
-    const posts = await listPosts();
+    const posts = await listPosts(resolved);
     const summary = buildSummary(posts);
-    await writeJson(summaryPath, summary);
-    return { auth_status: "not_configured", missing, checked_posts: 0, new_snapshots: 0, summary, summary_path: summaryPath };
+    await writeJson(resolved.summaryPath, summary);
+    return { account_key: resolved.accountKey, auth_status: "not_configured", missing, checked_posts: 0, new_snapshots: 0, summary, summary_path: resolved.summaryPath };
   }
 
-  const posts = await listPosts();
+  const posts = await listPosts(resolved);
   const minimumHours = Math.max(1, Number(process.env.INSIGHTS_LATEST_MIN_HOURS || 12));
   let checkedPosts = 0;
   let newSnapshots = 0;
@@ -258,7 +290,7 @@ async function updateInstagramInsights({ now = new Date() } = {}) {
     const plan = collectionPlan(post, now, minimumHours);
     if (!plan) continue;
     checkedPosts += 1;
-    const metrics = await collectMetrics(post.instagram_media_id);
+    const metrics = await collectMetrics(post.instagram_media_id, resolved);
     const authError = Object.values(metrics).find(item => item.status === "auth_error");
     if (authError) {
       const error = new Error(`Instagram Insights 인증 실패: ${authError.message}`);
@@ -286,13 +318,13 @@ async function updateInstagramInsights({ now = new Date() } = {}) {
     };
     post.insights ||= { snapshots: [] };
     post.insights.snapshots.push(snapshot);
-    await writeJson(postPath(post.post_id), post);
+    await writeJson(postPath(post.post_id, resolved), post);
     newSnapshots += 1;
     postResults.push({ post_id: post.post_id, status: "collected", snapshot });
   }
-  const refreshed = await listPosts();
+  const refreshed = await listPosts(resolved);
   const summary = buildSummary(refreshed);
-  await writeJson(summaryPath, summary);
+  await writeJson(resolved.summaryPath, summary);
   const authStatus = !checkedPosts
     ? "not_checked_no_due_posts"
     : postResults.some(item => item.status === "permission_missing")
@@ -301,14 +333,15 @@ async function updateInstagramInsights({ now = new Date() } = {}) {
         ? "temporary_failure"
         : "verified";
   return {
+    account_key: resolved.accountKey,
     auth_status: authStatus,
     checked_posts: checkedPosts,
     new_snapshots: newSnapshots,
     supported_metrics: [...new Set(postResults.flatMap(result => result.snapshot ? METRICS.filter(metric => result.snapshot.metrics[metric]?.status === "ok") : []))],
     posts: postResults,
     summary,
-    posts_dir: postsDir,
-    summary_path: summaryPath
+    posts_dir: resolved.postsDir,
+    summary_path: resolved.summaryPath
   };
 }
 
