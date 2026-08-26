@@ -36,6 +36,10 @@ npm run trend:test
 
 각 최종 컨셉은 `original_trend`, `pet_adaptation`, `source_evidence`, `independent_source_count`, `recent_source_count_7d`, `recent_source_count_30d`, `cross_platform_count`, `latest_source_date`, `evidence_strength`, `weak_signal`, `trend_momentum`을 포함합니다.
 
+또한 Kongi 실행 형식을 위한 `owner_mode`, `owner_requirement_reason`, `post_format`, `carousel_fit_score`, `preferred_slide_count`, `carousel_reason`, `carousel_storyboard_type`을 포함합니다. 기본값은 `none + single`입니다. 보호자가 없으면 직접 비교·같은 자세·split-face 같은 핵심 아이디어가 성립하지 않는 명시적 human-pet 비교 컨셉만 `required`로 표시합니다. 여행·생활 스냅처럼 보호자 없이도 성립하면 `optional` 또는 `none`이며 실제 운영에서는 둘 다 보호자를 생략합니다.
+
+Carousel은 photo dump, mini-magazine, then-vs-now, 시간 흐름, 단계적 reveal처럼 여러 장이 시각적 핵심을 명확히 강화할 때만 선택합니다. 단순히 여러 장으로 만들 수 있다는 이유만으로 carousel을 지정하지 않으며 기본 content slide 수는 4장입니다.
+
 ## 독립 출처와 source quality
 
 - Google News URL은 aggregator 도메인 대신 RSS에 포함된 원 게시자 이름으로 구분합니다.
@@ -130,6 +134,9 @@ TREND_RADAR_SELECTION_ACCOUNTS=kongi
 TREND_RADAR_MIN_EVIDENCE=50
 TREND_RADAR_ALLOW_DECLINING=false
 TREND_RADAR_DUPLICATE_THRESHOLD=0.72
+KONGI_OWNER_REQUIRED_ENABLED=false
+KONGI_CAROUSEL_IDEAS_ENABLED=false
+KONGI_OWNER_OPTIONAL_POLICY=omit
 ```
 
-ON 상태에서도 코드상 실제 선택 허용 계정은 `kongi`뿐입니다. publishable, 최소 Evidence, declining 정책과 최근 30개/60일 게시물 의미 중복 검사를 통과한 첫 후보만 `preflight.selected_idea`가 됩니다. 조건 미달이나 오류는 기존 generator로 fallback하며 이미지 생성, validation, caption, Git, Meta 게시 경로에는 관여하지 않습니다.
+ON 상태에서도 코드상 실제 선택 허용 계정은 `kongi`뿐입니다. publishable, 최소 Evidence, declining 정책과 최근 30개/60일 게시물 의미 중복 검사를 통과한 뒤 owner-required 후보는 owner reference 가용성까지 확인합니다. 사용할 수 없는 required 후보는 건너뛰고 다음 후보를 검사합니다. Carousel flag가 꺼져 있거나 metadata가 없는 concept은 기존 single 경로를 유지합니다. 조건 미달이나 오류는 기존 generator로 fallback하며 Hamnimi 정책은 바뀌지 않습니다.

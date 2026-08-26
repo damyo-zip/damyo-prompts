@@ -255,6 +255,18 @@ const conceptRules = [
     fits: [98, 98, 100]
   },
   {
+    key: "owner-pet-visual-comparison",
+    patterns: [
+      /(?:owner|human|person).{0,30}(?:pet|dog|cat).{0,30}(?:comparison|lookalike|split.face|matching pose|mirror pose)/i,
+      /(?:pet|dog|cat).{0,30}(?:owner|human|person).{0,30}(?:comparison|lookalike|split.face|matching pose|mirror pose)/i
+    ],
+    title: "Owner-Pet Visual Comparison",
+    description: "보호자와 반려동물의 얼굴, 표정 또는 같은 자세를 직접 비교해야 의미가 완성되는 관계형 초상",
+    adaptation: "보호자와 반려동물이 같은 표정과 자세를 나란히 보여주는 직접 비교 초상",
+    scores: [94, 98, 91, 97],
+    fits: [99, 99, 96]
+  },
+  {
     key: "eye-contact-campaign",
     patterns: [/eye contact/i, /intense gaze/i],
     title: "Direct-Eye-Contact Pet Close-Up",
@@ -330,12 +342,82 @@ const originalTrendByKey = {
   "toy-scene-reenactment": "Household-toy recreations of familiar movie scenes",
   "cinematic-place-postcard": "Cinematic location and travel photography",
   "parallel-self-swap": "Consistent-character and parallel-self image transformations",
+  "owner-pet-visual-comparison": "Direct owner-and-pet visual comparisons and matching-pose portraits",
   "eye-contact-campaign": "Direct-eye-contact advertising close-ups",
   "color-drenching": "Monochromatic colour-drenched rooms and sets",
   "cozy-hands-on-hobby": "Screen-free cozy hands-on hobbies",
   "curated-clutter-maximalism": "Curated-clutter maximalist interiors",
   "statement-metal-accessory": "Oversized statement-metal accessories"
 };
+
+const experienceByKey = {
+  "retro-direct-flash-dump": {
+    owner_mode: "optional",
+    owner_requirement_reason: "The casual snapshot format works without an owner, so the owner is omitted by policy.",
+    post_format: "carousel",
+    carousel_fit_score: 94,
+    preferred_slide_count: 4,
+    carousel_reason: "A photo dump is stronger as several consistent moments than as one isolated frame.",
+    carousel_storyboard_type: "photo_dump"
+  },
+  "scrapbook-carousel": {
+    post_format: "carousel",
+    carousel_fit_score: 96,
+    preferred_slide_count: 4,
+    carousel_reason: "The mini-magazine format depends on swiping through related pages.",
+    carousel_storyboard_type: "scrapbook"
+  },
+  "august-photo-grid": {
+    post_format: "carousel",
+    carousel_fit_score: 93,
+    preferred_slide_count: 4,
+    carousel_reason: "Multiple late-summer variations are the core of the recap format.",
+    carousel_storyboard_type: "photo_dump"
+  },
+  "nostalgia-time-capsule": {
+    post_format: "carousel",
+    carousel_fit_score: 97,
+    preferred_slide_count: 4,
+    carousel_reason: "A swipe sequence makes the past-to-present comparison clearer.",
+    carousel_storyboard_type: "then_now"
+  },
+  "absurd-character-horror": {
+    post_format: "carousel",
+    carousel_fit_score: 88,
+    preferred_slide_count: 4,
+    carousel_reason: "Progressive discovery and a final reveal strengthen the doorway cameo.",
+    carousel_storyboard_type: "reveal"
+  },
+  "cinematic-place-postcard": {
+    owner_mode: "optional",
+    owner_requirement_reason: "The travel scene remains complete with the pet alone."
+  },
+  "cinematic-motion-blur": {
+    owner_mode: "optional",
+    owner_requirement_reason: "The night-walk snapshot does not require a visible owner."
+  },
+  "owner-pet-visual-comparison": {
+    owner_mode: "required",
+    owner_requirement_reason: "The original visual format depends on a direct human-pet comparison.",
+    post_format: "single",
+    carousel_fit_score: 55,
+    preferred_slide_count: 1,
+    carousel_reason: "A single direct comparison frame communicates the concept most clearly."
+  }
+};
+
+function experienceMetadataForKey(key) {
+  return {
+    owner_mode: "none",
+    owner_requirement_reason: "",
+    post_format: "single",
+    carousel_fit_score: 0,
+    preferred_slide_count: 1,
+    carousel_reason: "",
+    carousel_storyboard_type: "progression",
+    ...(experienceByKey[key] || {})
+  };
+}
 
 function conceptId(key) {
   return `trend-${createHash("sha1").update(key).digest("hex").slice(0, 12)}`;
@@ -362,10 +444,11 @@ function analyzeCandidate(candidate) {
       account_fit: rule.scores[3]
     },
     fit_scores: { dog: rule.fits[0], cat: rule.fits[1], hamster: rule.fits[2] },
+    ...experienceMetadataForKey(rule.key),
     grounding_patterns: matchedPatterns,
     grounded_candidate_urls: candidate.source_url ? [candidate.source_url] : [],
     candidates: [candidate]
   };
 }
 
-export { analyzeCandidate, conceptId, conceptRules, originalTrendByKey };
+export { analyzeCandidate, conceptId, conceptRules, experienceMetadataForKey, originalTrendByKey };

@@ -1,0 +1,13 @@
+{
+  "run_id": "20260825-123000-abcd",
+  "account_key": "kongi",
+  "slide": 1,
+  "attempt": 1,
+  "identity_score": 90,
+  "owner_identity_score": 90,
+  "visual_quality_score": 88,
+  "concept_score": 94,
+  "carousel_consistency_score": 90,
+  "fatal_issue": false,
+  "notes": "콩이와 필요한 경우 보호자의 정체성이 유지되고, 장면 품질과 storyboard 연속성이 기준을 통과함"
+}

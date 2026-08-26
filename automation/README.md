@@ -7,6 +7,8 @@
 | `kongi` | 콩이 | `dog` | `automation/reference/kongi.png` |
 | `hamnimi` | 햄님이 | `small` | `automation/reference/hamnimi.png` |
 
+Kongi의 생성형 보호자 reference는 `automation/reference/kongi-owner.png`에 둡니다. 이 파일은 `owner_mode: "required"`인 Kongi 컨셉에서만 generation reference로 전달하며 `optional`과 `none`에서는 존재 여부와 무관하게 사용하지 않습니다. Hamnimi에는 owner/carousel 확장을 적용하지 않습니다.
+
 운영 명령은 계정별로 분리됩니다.
 
 ```text
@@ -30,6 +32,8 @@ npm run trend:test
 ```
 
 `preflight` 결과의 `trend_radar.concept`는 현재 계정의 추천 아이디어입니다. `TREND_RADAR_ENABLE_SELECTION=true`이면 1단계 운영 대상인 `kongi`에서만 publishable·Evidence·Momentum·최근 중복 조건을 다시 통과한 최상위 후보가 `selected_idea`와 실제 `idea_guidance`가 됩니다. `hamnimi`는 flag 설정과 무관하게 기존 generator 흐름을 유지합니다. 비활성화·미지원 계정·조건 미달·Radar 오류는 `idea_source: "fallback_generator"`와 원래 `idea_guidance`로 안전하게 복귀합니다. 상세 구조는 `automation/trend-radar/README.md`를 참고합니다.
+
+Kongi 전용 실행 정책은 `KONGI_OWNER_REQUIRED_ENABLED`, `KONGI_CAROUSEL_IDEAS_ENABLED`로 각각 켭니다. 기본값은 기존 동작 보존을 위해 OFF입니다. `KONGI_OWNER_OPTIONAL_POLICY=omit`은 고정 정책이며 optional owner를 실제 generation reference에서 항상 제외합니다. owner-required 후보인데 reference가 없거나 손상되면 다음 publishable 후보를 검사하고, 모두 실행 불가능하면 기존 generator로 fallback합니다.
 
 ## 최초 설정
 
@@ -61,6 +65,8 @@ Insights의 일시적 장애나 일부 미지원 지표는 새 게시를 막지 
 
 `preflight.idea_source`가 `trend_radar`이면 `selected_idea`를 실제 아이디어 입력으로 사용합니다. `fallback_generator`이면 Codex가 선택된 계정의 `animal` 게시물만 대상으로 `title`, `category`, `description`, `prompt`, `automation/posts/<accountKey>/`의 `idea_category`·`idea_summary`, 해당 계정 Instagram 성과, 최근 중복 여부를 비교하고 후보를 내부 평가한 뒤 하나를 자동 선정합니다. `automation/draft.example.json` 형식으로 `<run_dir>/draft.json`을 만들고 `account_key`를 기록합니다. 후보 평가는 신선도, 생성 성공 가능성, 보호자의 따라하기 욕구, 과거 성과, 중복, 탐색 가치를 함께 봅니다.
 
+preflight의 `owner_mode`, `owner_asset_available`, `owner_asset_used`, `post_format`, `preferred_slide_count`, `slides`를 draft에 그대로 반영합니다. metadata가 없는 기존 아이디어와 draft는 `owner_mode: "none"`, `post_format: "single"`로 처리됩니다. Carousel draft는 3~5개의 순서가 있는 `slides`를 가지며 기본은 `hook → setup → development → reveal` 4장입니다. 각 slide의 `scene`은 같은 원본 컨셉과 visual language를 공유해야 합니다.
+
 햄님이는 작은 체구가 분명히 드러나는 미니어처, 스케일 대비, 사람처럼 행동하는 상황극, 실제 보호자의 스마트폰 스냅 같은 콘텐츠에 가산점을 줍니다. 기존 `animal: "small"` 콘텐츠와 구도·테마·상황·소품이 사실상 같은 아이디어는 피합니다.
 
 표본 1~4개는 성과를 수집만 하고, 5~9개는 약한 참고 신호, 10~19개는 의미 있는 신호, 20개 이상은 더 적극적인 신호로 사용합니다. 성과 기반 활용은 약 75%, 새 아이디어 탐색은 약 25%를 목표로 하며 탐색을 0으로 만들지 않습니다. 저장·공유와 `save_rate`·`share_rate`를 좋아요보다 중요한 가치 신호로 보되 성과를 절대 목표로 삼지 않습니다.
@@ -78,7 +84,9 @@ Insights의 일시적 장애나 일부 미지원 지표는 새 게시를 막지 
 
 ### 3. Codex 기본 이미지 생성과 시각 검수
 
-`automation/reference/kongi.png`를 reference image로 사용하여 Codex 앱의 기본 이미지 생성 기능으로 세로 4:5 이미지를 생성합니다. 생성물을 `<run_dir>/attempt-1.*`에 복사한 뒤 직접 열어 봅니다.
+기본적으로 `automation/reference/kongi.png`만 reference image로 사용합니다. preflight가 `owner_asset_used: true`라고 명시한 owner-required Kongi 컨셉에서만 `automation/reference/kongi-owner.png`를 함께 사용합니다. Optional과 none에서는 owner reference를 전달하거나 결과에 보호자를 등장시키지 않습니다.
+
+Single은 기존처럼 세로 4:5 이미지 한 장을 생성합니다. Carousel은 slide 1에 Kongi reference(필요 시 owner reference)를 사용하고, slide 2~4에는 같은 canonical reference와 통과한 slide 1 anchor를 함께 참고해 identity와 visual language를 유지합니다. 생성물은 `<run_dir>/slide-1-attempt-1.*`처럼 slide별로 보존하며, 실패한 slide만 최대 3회 재생성합니다.
 
 각 시도마다 `automation/review.example.json` 형식의 `<run_dir>/review-N.json`을 기록합니다. 다음 중 하나면 문제를 생성 지침에 반영해 다시 생성합니다.
 
@@ -89,13 +97,15 @@ concept_score < 80
 fatal_issue == true
 ```
 
+Carousel은 `automation/carousel-review.example.json` 형식으로 각 slide를 따로 검수합니다. 기존 기준을 그대로 유지하면서 `carousel_consistency_score >= 80`을 추가하고, 보호자가 실제 등장하는 slide는 `owner_identity_score >= 75`도 요구합니다. 검수 대상은 Kongi identity, 필요한 owner identity, visual style, storyboard continuity입니다.
+
 최대 3회입니다. 모두 실패하면 다음 명령으로 실패를 기록하고 사이트·Git·Instagram을 건드리지 않습니다.
 
 ```powershell
 node automation/run.mjs fail <accountKey> --run-id <run_id> --reason "세 번의 이미지 검수 실패"
 ```
 
-통과 이미지는 다음 명령으로 1080×1350 JPEG를 준비합니다. 원본 비율이 4:5에서 2% 넘게 벗어나면 자동 크롭하지 않고 실패합니다.
+통과 이미지는 다음 명령으로 각각 1080×1350 JPEG를 준비합니다. 원본 비율이 4:5에서 2% 넘게 벗어나면 자동 크롭하지 않고 실패합니다.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File automation/prepare-image.ps1 `
@@ -111,16 +121,27 @@ powershell -ExecutionPolicy Bypass -File automation/prepare-image.ps1 `
 node automation/run.mjs complete <accountKey> --draft <run_dir>/draft.json --image <run_dir>/attempt-N-final.jpg --review <run_dir>/review-N.json
 ```
 
+Carousel은 storyboard 순서대로 `--image`, `--review`를 반복합니다.
+
+```powershell
+node automation/run.mjs complete kongi `
+  --draft <run_dir>/draft.json `
+  --image <run_dir>/slide-1-final.jpg --review <run_dir>/review-slide-1.json `
+  --image <run_dir>/slide-2-final.jpg --review <run_dir>/review-slide-2.json `
+  --image <run_dir>/slide-3-final.jpg --review <run_dir>/review-slide-3.json `
+  --image <run_dir>/slide-4-final.jpg --review <run_dir>/review-slide-4.json
+```
+
 `DRY_RUN=true`에서는 가상 게시물과 모든 데이터 검증 결과 및 콘텐츠→계정별 CTA Carousel payload만 `<run_dir>`에 저장합니다. `prompts.js`, Git, 공개 사이트, Instagram은 변경하지 않습니다. `node automation/run.mjs cta-check <accountKey>`로 CTA 파일·규격·공개 URL·child 순서를 Meta 요청 없이 별도 확인할 수 있습니다.
 
 `DRY_RUN=false`에서는 검수 통과 후에만 다음 순서로 진행합니다.
 
 1. `prompts.js` 타임스탬프 백업
-2. `images/pXXX-01.jpg` 복사 및 `PROMPTS` 맨 앞 추가
+2. Single은 `images/pXXX-01.jpg`, Carousel은 `images/pXXX-01.jpg`부터 순서대로 복사하고 `PROMPTS` 맨 앞에 하나의 게시물로 추가
 3. JavaScript 문법, 배열, ID, 이미지 경로, 기존 개수 검증
 4. 자동 생성 파일만 `git add`, commit, push
 5. GitHub Pages 또는 `PUBLIC_SITE_URL`에서 콘텐츠 이미지와 계정별 CTA 이미지의 HTTP 200 확인
-6. 콘텐츠 이미지와 CTA를 각각 `is_carousel_item=true` child로 만들고 모두 준비된 뒤, 콘텐츠→CTA 순서의 `media_type=CAROUSEL` parent에 caption을 적용하여 `/media_publish` 게시
+6. 모든 콘텐츠 이미지와 CTA를 각각 `is_carousel_item=true` child로 만들고 모두 준비된 뒤, `content_1 → ... → content_N → CTA` 순서의 기존 `media_type=CAROUSEL` parent에 caption을 적용하여 `/media_publish` 게시
 7. media ID와 commit을 `automation/state/<accountKey>.json` 및 계정별 JSONL 로그에 저장
 8. `automation/posts/<accountKey>/<post_id>.json`에 아이디어와 Instagram 게시 메타데이터 저장
 
@@ -169,6 +190,7 @@ powershell -ExecutionPolicy Bypass -File automation/register-insights-task.ps1
 ## 런타임 파일
 
 - `automation/reference/kongi.png`: 수정하지 않는 콩이 canonical reference
+- `automation/reference/kongi-owner.png`: owner-required Kongi 컨셉에서만 사용하는 생성형 보호자 canonical reference
 - `automation/runs/<accountKey>/<run_id>/`: 초안, 생성 시도, 검수, 가상 게시 데이터
 - `automation/backups/<accountKey>/<timestamp>/`: 실제 수정 전 백업
 - `automation/logs/<accountKey>/YYYY-MM-DD.jsonl`: 계정별 단계 로그

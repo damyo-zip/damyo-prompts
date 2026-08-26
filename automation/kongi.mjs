@@ -26,12 +26,20 @@ import {
 } from "./insights.mjs";
 import { ideaGuidanceForSelection, selectIdeaSource, selectionLogDetails } from "./idea-selector.mjs";
 import { getBestTrendForAccount } from "./trend-radar/index.mjs";
+import {
+  buildCarouselStoryboard,
+  generationReferences,
+  validateDraftExperience,
+  validateReviewPackage,
+  validateReviewScores
+} from "./content-experience.mjs";
 
 const automationDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = dirname(automationDir);
 const promptsPath = join(projectRoot, "prompts.js");
 let accountConfig = kongiAccount;
 let referencePath;
+let ownerReferencePath;
 let statePath;
 let runsDir;
 let logsDir;
@@ -43,6 +51,7 @@ const MAX_ATTEMPTS = 3;
 function configureAccount(config) {
   accountConfig = config;
   referencePath = join(automationDir, "reference", config.referenceFile);
+  ownerReferencePath = config.ownerReferenceFile ? join(automationDir, "reference", config.ownerReferenceFile) : null;
   statePath = join(automationDir, "state", `${config.accountKey}.json`);
   runsDir = join(automationDir, "runs", config.accountKey);
   logsDir = join(automationDir, "logs", config.accountKey);
@@ -72,6 +81,14 @@ function hasFlag(name) {
 function option(name, fallback = "") {
   const index = process.argv.indexOf(name);
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
+}
+
+function options(name) {
+  const values = [];
+  for (let index = 0; index < process.argv.length; index += 1) {
+    if (process.argv[index] === name && process.argv[index + 1]) values.push(process.argv[index + 1]);
+  }
+  return values;
 }
 
 function booleanValue(value, fallback = false) {
@@ -342,6 +359,8 @@ async function commandInspect() {
     project_root: projectRoot,
     reference_image: referencePath,
     reference_exists: await exists(referencePath),
+    owner_reference_image: ownerReferencePath,
+    owner_reference: await ownerReferenceStatus(),
     instagram_cta_image: ctaPath,
     instagram_cta_exists: await exists(ctaPath),
     git: gitSnapshot(),
@@ -366,6 +385,7 @@ async function commandPreflight() {
   const snapshot = gitSnapshot();
   assertCleanGit(snapshot, allowDevelopmentDirty);
   if (!(await exists(referencePath))) throw new Error(`${accountConfig.displayName} 기준 이미지가 없습니다: ${referencePath}`);
+  const ownerReference = await ownerReferenceStatus();
 
   const { PROMPTS } = await readSiteData();
   const site = summarizeSite(PROMPTS);
@@ -387,7 +407,14 @@ async function commandPreflight() {
   }
   const ideaSelection = await selectIdeaSource({
     accountName: accountConfig.accountKey,
-    recentPosts: [...site.account_posts.slice(0, 30), ...recentHistoryResult.items]
+    recentPosts: [...site.account_posts.slice(0, 30), ...recentHistoryResult.items],
+    ownerAssetAvailable: ownerReference.available
+  });
+  const storyboard = buildCarouselStoryboard(ideaSelection.selected_idea || {}, ideaSelection);
+  const generationReferenceImages = generationReferences({
+    petReference: referencePath,
+    ownerReference: ownerReference.path,
+    experience: ideaSelection
   });
   const ideaGuidance = ideaGuidanceForSelection(ideaSelection, accountConfig.ideaGuidance);
   await appendLog(runId, "idea_selection", selectionLogDetails(ideaSelection));
@@ -407,9 +434,21 @@ async function commandPreflight() {
     selected_idea: ideaSelection.selected_idea,
     fallback_used: ideaSelection.fallback_used,
     fallback_reason: ideaSelection.fallback_reason,
+    owner_mode: ideaSelection.owner_mode,
+    owner_requirement_reason: ideaSelection.owner_requirement_reason,
+    owner_asset_available: ideaSelection.owner_asset_available,
+    owner_asset_used: ideaSelection.owner_asset_used,
+    owner_reference_image: ideaSelection.owner_asset_used ? ownerReference.path : null,
+    post_format: ideaSelection.post_format,
+    carousel_fit_score: ideaSelection.carousel_fit_score,
+    carousel_reason: ideaSelection.carousel_reason,
+    preferred_slide_count: ideaSelection.preferred_slide_count,
+    slides: storyboard,
+    generation_reference_images: generationReferenceImages,
     idea_selection: ideaSelection,
     trend_radar: trendRecommendation,
     identity_guidance: accountConfig.identityGuidance,
+    owner_identity_guidance: ideaSelection.owner_asset_used ? accountConfig.ownerIdentityGuidance : null,
     performance_context: performanceUpdate.summary || null,
     insights_update: {
       auth_status: performanceUpdate.auth_status,
@@ -441,6 +480,12 @@ async function commandPreflight() {
     performance_report: payload.performance_report,
     idea_source: payload.idea_source,
     trend_concept_id: ideaSelection.trend_concept_id,
+    owner_mode: payload.owner_mode,
+    owner_asset_available: payload.owner_asset_available,
+    owner_asset_used: payload.owner_asset_used,
+    post_format: payload.post_format,
+    slide_count: payload.preferred_slide_count,
+    slides: payload.slides,
     fallback_used: payload.fallback_used,
     fallback_reason: payload.fallback_reason
   });
@@ -487,29 +532,15 @@ function validateDraft(draft, expectedPostId) {
   const missing = requiredPatterns.filter(([pattern]) => !pattern.test(draft.prompt)).map(([, label]) => label);
   if (missing.length) throw new Error(`공유용 prompt 필수 요소 누락: ${missing.join(", ")}`);
   if (draft.caption.length > 2200) throw new Error("Instagram 캡션이 2,200자를 초과합니다.");
-  return true;
+  return validateDraftExperience(draft, { accountName: accountConfig.accountKey });
 }
 
 function validateReview(review, runId) {
-  if (review.run_id !== runId) throw new Error("review.run_id가 draft.run_id와 다릅니다.");
-  if (review.account_key && review.account_key !== accountConfig.accountKey) throw new Error("review.account_key가 현재 계정과 다릅니다.");
-  if (!Number.isInteger(review.attempt) || review.attempt < 1 || review.attempt > MAX_ATTEMPTS) {
-    throw new Error(`review.attempt는 1~${MAX_ATTEMPTS} 정수여야 합니다.`);
-  }
-  for (const key of ["identity_score", "visual_quality_score", "concept_score"]) {
-    if (typeof review[key] !== "number" || review[key] < 0 || review[key] > 100) {
-      throw new Error(`review.${key}는 0~100 숫자여야 합니다.`);
-    }
-  }
-  if (typeof review.fatal_issue !== "boolean") throw new Error("review.fatal_issue는 boolean이어야 합니다.");
-  assertNonEmptyString(review.notes, "review.notes");
-  return {
-    passed: review.identity_score >= 75 &&
-      review.visual_quality_score >= 80 &&
-      review.concept_score >= 80 &&
-      review.fatal_issue === false,
-    thresholds: { identity_score: 75, visual_quality_score: 80, concept_score: 80, fatal_issue: false }
-  };
+  return validateReviewScores(review, {
+    runId,
+    accountKey: accountConfig.accountKey,
+    maxAttempts: MAX_ATTEMPTS
+  });
 }
 
 async function imageMetadata(path) {
@@ -535,6 +566,17 @@ async function imageMetadata(path) {
   throw new Error("지원하지 않거나 손상된 이미지입니다. PNG 또는 JPEG를 사용하세요.");
 }
 
+async function ownerReferenceStatus() {
+  if (!ownerReferencePath) return { configured: false, available: false, path: null, error: null };
+  if (!(await exists(ownerReferencePath))) return { configured: true, available: false, path: ownerReferencePath, error: "missing" };
+  try {
+    const metadata = await imageMetadata(ownerReferencePath);
+    return { configured: true, available: true, path: ownerReferencePath, ...metadata, error: null };
+  } catch (error) {
+    return { configured: true, available: false, path: ownerReferencePath, error: error.message };
+  }
+}
+
 async function validateInstagramCtaImage() {
   const relativePath = instagramCtaRelativePath();
   const absolutePath = instagramCtaPath();
@@ -553,17 +595,33 @@ async function validateInstagramCtaImage() {
   return { relative_path: relativePath, absolute_path: absolutePath, ...metadata, ratio: 0.8 };
 }
 
-function makePost(draft, imageSrc) {
+function makePost(draft, imageSources) {
+  const sources = Array.isArray(imageSources) ? imageSources : [imageSources];
   return {
     id: draft.post_id,
     animal: accountConfig.animal,
     title: draft.title.trim(),
     category: draft.category.trim(),
-    cover: imageSrc,
+    cover: sources[0],
     description: draft.description.trim(),
     prompt: draft.prompt.trim(),
-    images: [{ src: imageSrc }]
+    images: sources.map(src => ({ src }))
   };
+}
+
+function publicationMetadata(draft, imageSources = []) {
+  const experience = validateDraftExperience(draft, { accountName: accountConfig.accountKey });
+  const metadata = {
+    owner_mode: experience.owner_mode,
+    owner_asset_used: experience.owner_asset_used,
+    post_format: experience.post_format,
+    slide_count: imageSources.length || experience.preferred_slide_count,
+    image_src: imageSources[0] || null,
+    image_srcs: imageSources
+  };
+  if (draft.idea_source) metadata.idea_source = draft.idea_source;
+  if (draft.trend_concept_id) metadata.trend_concept_id = draft.trend_concept_id;
+  return metadata;
 }
 
 function validateSite(prompts, post, previousCount, projectImageExists) {
@@ -777,19 +835,22 @@ async function publishInstagramCarousel({
 
 async function continuePublishedRun(draft, state) {
   const numericId = draft.post_id.slice(2);
-  const imageSrc = state.image_src || `images/p${numericId}-01.jpg`;
+  const imageSources = Array.isArray(state.image_srcs) && state.image_srcs.length
+    ? state.image_srcs
+    : [state.image_src || `images/p${numericId}-01.jpg`];
+  const metadata = publicationMetadata(draft, imageSources);
   const cta = await validateInstagramCtaImage();
   const ctaImageUrl = publicAssetUrl(cta.relative_path);
   let current = state;
 
   if (current.stage === "site_validated") {
-    assertOnlyExpectedChanges(["prompts.js", imageSrc]);
-    runGit(["add", "--", "prompts.js", imageSrc]);
-    runGit(["commit", "-m", `Auto publish ${draft.post_id}: ${draft.title}`, "--", "prompts.js", imageSrc]);
+    assertOnlyExpectedChanges(["prompts.js", ...imageSources]);
+    runGit(["add", "--", "prompts.js", ...imageSources]);
+    runGit(["commit", "-m", `Auto publish ${draft.post_id}: ${draft.title}`, "--", "prompts.js", ...imageSources]);
     const commit = runGit(["rev-parse", "HEAD"]).stdout;
     current = await updateState(draft.run_id, "git_committed", {
       post_id: draft.post_id,
-      image_src: imageSrc,
+      ...metadata,
       git_commit: commit
     });
   }
@@ -801,21 +862,21 @@ async function continuePublishedRun(draft, state) {
     runGit(["push"]);
     current = await updateState(draft.run_id, "git_pushed", {
       post_id: draft.post_id,
-      image_src: imageSrc,
+      ...metadata,
       git_commit: current.git_commit
     });
   }
 
   if (current.stage === "git_pushed") {
-    const imageUrl = publicAssetUrl(imageSrc);
-    await verifyPublicImage(imageUrl);
+    const imageUrls = imageSources.map(source => publicAssetUrl(source));
+    for (const imageUrl of imageUrls) await verifyPublicImage(imageUrl);
     await verifyPublicImage(ctaImageUrl);
     current = await updateState(draft.run_id, "deployment_verified", {
       post_id: draft.post_id,
-      image_src: imageSrc,
+      ...metadata,
       git_commit: current.git_commit,
-      public_image_url: imageUrl,
-      public_content_image_urls: [imageUrl],
+      public_image_url: imageUrls[0],
+      public_content_image_urls: imageUrls,
       public_cta_image_url: ctaImageUrl,
       instagram_cta_path: cta.relative_path
     });
@@ -850,7 +911,7 @@ async function continuePublishedRun(draft, state) {
     if (!instagram.configured) {
       const waiting = await updateState(draft.run_id, "awaiting_meta_credentials", {
         post_id: draft.post_id,
-        image_src: imageSrc,
+        ...metadata,
         git_commit: current.git_commit,
         public_image_url: current.public_image_url,
         public_content_image_urls: contentImageUrls,
@@ -870,7 +931,7 @@ async function continuePublishedRun(draft, state) {
     }
     const published = await updateState(draft.run_id, "instagram_published", {
       post_id: draft.post_id,
-      image_src: imageSrc,
+      ...metadata,
       git_commit: current.git_commit,
       public_image_url: current.public_image_url,
       public_content_image_urls: contentImageUrls,
@@ -893,6 +954,7 @@ async function continuePublishedRun(draft, state) {
       instagram_published: true,
       git_commit: published.git_commit,
       public_image_url: published.public_image_url,
+      public_image_urls: published.public_content_image_urls,
       instagram_performance_update: published.performance_report || null,
       ...instagram
     }, null, 2));
@@ -901,16 +963,16 @@ async function continuePublishedRun(draft, state) {
 
 async function commandComplete() {
   const draftPath = resolve(option("--draft"));
-  const imagePath = resolve(option("--image"));
-  const reviewPath = resolve(option("--review"));
-  if (!option("--draft") || !option("--image") || !option("--review")) {
-    throw new Error("--draft, --image, --review가 모두 필요합니다.");
+  const imagePaths = options("--image").map(path => resolve(path));
+  const reviewPaths = options("--review").map(path => resolve(path));
+  if (!option("--draft") || !imagePaths.length || !reviewPaths.length) {
+    throw new Error("--draft와 하나 이상의 --image, --review가 필요합니다.");
   }
 
   const draft = await readJson(draftPath);
-  const review = await readJson(reviewPath);
+  const reviews = await Promise.all(reviewPaths.map(path => readJson(path)));
   const state = await readJson(statePath);
-  if (!draft || !review || !state) throw new Error("초안, 검수, 실행 상태를 읽지 못했습니다.");
+  if (!draft || reviews.some(review => !review) || !state) throw new Error("초안, 검수, 실행 상태를 읽지 못했습니다.");
   if (state.account_key && state.account_key !== accountConfig.accountKey) throw new Error("현재 state가 다른 계정에 속합니다.");
   if (state.stage === "instagram_published" && state.run_id === draft.run_id) {
     await savePublishedPostMetadata({ draft, state, context: insightsContext() });
@@ -918,31 +980,56 @@ async function commandComplete() {
     return;
   }
   if (state.run_id !== draft.run_id) throw new Error("현재 state의 run_id와 draft.run_id가 다릅니다.");
-  validateDraft(draft, state.post_id);
-  const reviewResult = validateReview(review, draft.run_id);
-  if (!reviewResult.passed) {
-    await updateState(draft.run_id, review.attempt >= MAX_ATTEMPTS ? "failed" : "image_retry_required", {
+  const experience = validateDraft(draft, state.post_id);
+  for (const key of ["owner_mode", "owner_asset_used", "post_format"]) {
+    if (state[key] != null && state[key] !== experience[key]) throw new Error(`draft.${key}가 preflight state와 다릅니다.`);
+  }
+  if (experience.owner_asset_used) {
+    const ownerReference = await ownerReferenceStatus();
+    if (!ownerReference.available) throw new Error("owner-required draft의 보호자 reference를 읽을 수 없습니다.");
+  }
+  const expectedImageCount = experience.post_format === "carousel" ? experience.slides.length : 1;
+  if (state.slide_count != null && Number(state.slide_count) !== expectedImageCount) throw new Error("draft slide 수가 preflight state와 다릅니다.");
+  if (Array.isArray(state.slides) && JSON.stringify(state.slides) !== JSON.stringify(experience.slides)) {
+    throw new Error("draft storyboard가 preflight state와 다릅니다.");
+  }
+  if (imagePaths.length !== expectedImageCount) throw new Error(`${experience.post_format} --image 개수는 ${expectedImageCount}개여야 합니다.`);
+  const reviewPackage = validateReviewPackage(draft, reviews, {
+    accountName: accountConfig.accountKey,
+    accountKey: accountConfig.accountKey,
+    maxAttempts: MAX_ATTEMPTS
+  });
+  if (!reviewPackage.passed) {
+    await updateState(draft.run_id, reviewPackage.terminal_failure ? "failed" : "image_retry_required", {
       post_id: draft.post_id,
-      review,
-      review_thresholds: reviewResult.thresholds
+      reviews,
+      failed_slides: reviewPackage.failed_slides,
+      passed_slides: reviewPackage.passed_slides,
+      review_thresholds: reviewPackage.thresholds
     });
-    throw new Error(review.attempt >= MAX_ATTEMPTS ? "세 번의 이미지 검수 실패" : "이미지 검수 임계값 미달: 재생성이 필요합니다.");
+    throw new Error(reviewPackage.terminal_failure
+      ? `이미지 검수 최종 실패 slide: ${reviewPackage.failed_slides.join(", ")}`
+      : `이미지 검수 임계값 미달, 실패한 slide만 재생성 필요: ${reviewPackage.failed_slides.join(", ")}`);
   }
 
   const cta = await validateInstagramCtaImage();
-  const metadata = await imageMetadata(imagePath);
-  const ratio = metadata.width / metadata.height;
-  if (Math.abs(ratio - 0.8) > 0.02) throw new Error(`이미지 비율이 4:5가 아닙니다: ${metadata.width}x${metadata.height}`);
+  const imageMetadataList = await Promise.all(imagePaths.map(async (path, index) => {
+    const metadata = await imageMetadata(path);
+    const ratio = metadata.width / metadata.height;
+    if (Math.abs(ratio - 0.8) > 0.02) throw new Error(`${index + 1}번 이미지 비율이 4:5가 아닙니다: ${metadata.width}x${metadata.height}`);
+    return { source: path, ...metadata, ratio };
+  }));
   const dryRun = booleanValue(process.env.DRY_RUN, true);
   if (!dryRun && ["site_validated", "git_committed", "git_pushed", "deployment_verified", "awaiting_meta_credentials"].includes(state.stage)) {
     await continuePublishedRun(draft, state);
     return;
   }
   const numericId = draft.post_id.slice(2);
-  const imageSrc = `images/p${numericId}-01.jpg`;
-  const publicContentImageUrl = publicAssetUrl(imageSrc);
+  const imageSources = imagePaths.map((_, index) => `images/p${numericId}-${String(index + 1).padStart(2, "0")}.jpg`);
+  const publicContentImageUrls = imageSources.map(source => publicAssetUrl(source));
   const publicCtaImageUrl = publicAssetUrl(cta.relative_path);
-  const post = makePost(draft, imageSrc);
+  const post = makePost(draft, imageSources);
+  const metadata = publicationMetadata(draft, imageSources);
   const { source, PROMPTS } = await readSiteData();
   if (nextPostId(PROMPTS) !== draft.post_id) throw new Error("실행 중 다음 게시물 ID가 변경되었습니다. 새 preflight가 필요합니다.");
   if (PROMPTS.some(item => item.id === draft.post_id)) throw new Error(`ID가 이미 존재합니다: ${draft.post_id}`);
@@ -955,16 +1042,23 @@ async function commandComplete() {
     const result = {
       run_id: draft.run_id,
       dry_run: true,
+      owner_mode: experience.owner_mode,
+      owner_asset_used: experience.owner_asset_used,
+      post_format: experience.post_format,
+      slide_count: expectedImageCount,
+      slides: experience.slides,
       post,
-      image: { source: imagePath, ...metadata, ratio },
+      image: imageMetadataList[0],
+      images: imageMetadataList,
       instagram_carousel: buildInstagramCarouselPlan({
-        contentImageUrls: [publicContentImageUrl],
+        contentImageUrls: publicContentImageUrls,
         ctaImageUrl: publicCtaImageUrl,
         caption: draft.caption,
         altText: draft.alt_text
       }),
       instagram_cta_image: cta,
-      review,
+      review: reviews[0],
+      reviews,
       validation: {
         javascript_syntax: true,
         prompts_array: true,
@@ -974,16 +1068,26 @@ async function commandComplete() {
         existing_count_preserved: true,
         site_unchanged: true,
         git_unchanged: true,
-        instagram_unchanged: true
+        instagram_unchanged: true,
+        instagram_posting_attempted: false,
+        all_content_slides_passed: true,
+        carousel_consistency_passed: experience.post_format === "carousel" ? true : null
       }
     };
     await writeJson(join(runDir, "dry-run-result.json"), result);
-    await updateState(draft.run_id, "dry_run_complete", { post_id: draft.post_id, dry_run: true, review, image: metadata });
+    await updateState(draft.run_id, "dry_run_complete", {
+      post_id: draft.post_id,
+      dry_run: true,
+      ...metadata,
+      reviews,
+      images: imageMetadataList,
+      instagram_posting_attempted: false
+    });
     console.log(JSON.stringify(result, null, 2));
     return;
   }
 
-  if (metadata.format !== "jpeg") throw new Error("실제 게시 모드에서는 Meta 호환 JPEG 이미지가 필요합니다.");
+  if (imageMetadataList.some(item => item.format !== "jpeg")) throw new Error("실제 게시 모드에서는 모든 콘텐츠 이미지가 Meta 호환 JPEG여야 합니다.");
   const snapshot = gitSnapshot();
   assertCleanGit(snapshot, false);
   if (snapshot.head !== state.baseline_commit) throw new Error("preflight 이후 Git HEAD가 변경되었습니다.");
@@ -991,54 +1095,61 @@ async function commandComplete() {
   const timestamp = localTimestamp();
   const backupDir = join(backupsDir, timestamp);
   const backupPrompts = join(backupDir, "prompts.js");
-  const finalImagePath = join(projectRoot, ...imageSrc.split("/"));
+  const finalImagePaths = imageSources.map(source => join(projectRoot, ...source.split("/")));
+  const copiedImagePaths = [];
   let siteWritten = false;
   let commitCreated = false;
   await mkdir(backupDir, { recursive: true });
   await copyFile(promptsPath, backupPrompts, fsConstants.COPYFILE_EXCL);
   try {
-    await copyFile(imagePath, finalImagePath, fsConstants.COPYFILE_EXCL);
+    for (const [index, imagePath] of imagePaths.entries()) {
+      await copyFile(imagePath, finalImagePaths[index], fsConstants.COPYFILE_EXCL);
+      copiedImagePaths.push(finalImagePaths[index]);
+    }
     await atomicWrite(promptsPath, replacePromptsArray(source, nextPrompts));
     siteWritten = true;
     const verified = await readSiteData();
-    validateSite(verified.PROMPTS, post, PROMPTS.length, await exists(finalImagePath));
-    assertOnlyExpectedChanges(["prompts.js", imageSrc]);
-    await updateState(draft.run_id, "site_validated", { post_id: draft.post_id, image_src: imageSrc, backup_dir: backupDir });
+    const allImagesExist = (await Promise.all(finalImagePaths.map(path => exists(path)))).every(Boolean);
+    validateSite(verified.PROMPTS, post, PROMPTS.length, allImagesExist);
+    assertOnlyExpectedChanges(["prompts.js", ...imageSources]);
+    await updateState(draft.run_id, "site_validated", { post_id: draft.post_id, ...metadata, backup_dir: backupDir });
 
-    runGit(["add", "--", "prompts.js", imageSrc]);
-    assertOnlyExpectedChanges(["prompts.js", imageSrc]);
+    runGit(["add", "--", "prompts.js", ...imageSources]);
+    assertOnlyExpectedChanges(["prompts.js", ...imageSources]);
     const commitMessage = `Auto publish ${draft.post_id}: ${draft.title}`;
-    runGit(["commit", "-m", commitMessage, "--", "prompts.js", imageSrc]);
+    runGit(["commit", "-m", commitMessage, "--", "prompts.js", ...imageSources]);
     commitCreated = true;
     const commit = runGit(["rev-parse", "HEAD"]).stdout;
-    await updateState(draft.run_id, "git_committed", { post_id: draft.post_id, git_commit: commit });
+    await updateState(draft.run_id, "git_committed", { post_id: draft.post_id, ...metadata, git_commit: commit });
     runGit(["push"]);
-    await updateState(draft.run_id, "git_pushed", { post_id: draft.post_id, git_commit: commit });
+    await updateState(draft.run_id, "git_pushed", { post_id: draft.post_id, ...metadata, git_commit: commit });
 
     const baseUrl = inferPublicBaseUrl();
-    const imageUrl = publicAssetUrl(imageSrc, baseUrl);
+    const imageUrls = imageSources.map(source => publicAssetUrl(source, baseUrl));
     const ctaImageUrl = publicAssetUrl(cta.relative_path, baseUrl);
-    await verifyPublicImage(imageUrl);
+    for (const imageUrl of imageUrls) await verifyPublicImage(imageUrl);
     await verifyPublicImage(ctaImageUrl);
     await updateState(draft.run_id, "deployment_verified", {
       post_id: draft.post_id,
+      ...metadata,
       git_commit: commit,
-      public_image_url: imageUrl,
-      public_content_image_urls: [imageUrl],
+      public_image_url: imageUrls[0],
+      public_content_image_urls: imageUrls,
       public_cta_image_url: ctaImageUrl,
       instagram_cta_path: cta.relative_path
     });
 
     const instagram = await publishInstagramCarousel({
-      contentImageUrls: [imageUrl],
+      contentImageUrls: imageUrls,
       ctaImageUrl,
       caption: draft.caption,
       altText: draft.alt_text,
       onContainerCreated: async containers => updateState(draft.run_id, "deployment_verified", {
         post_id: draft.post_id,
+        ...metadata,
         git_commit: commit,
-        public_image_url: imageUrl,
-        public_content_image_urls: [imageUrl],
+        public_image_url: imageUrls[0],
+        public_content_image_urls: imageUrls,
         public_cta_image_url: ctaImageUrl,
         instagram_cta_path: cta.relative_path,
         instagram_child_container_ids: containers.child_container_ids,
@@ -1049,21 +1160,23 @@ async function commandComplete() {
     if (!instagram.configured) {
       await updateState(draft.run_id, "awaiting_meta_credentials", {
         post_id: draft.post_id,
+        ...metadata,
         git_commit: commit,
-        public_image_url: imageUrl,
-        public_content_image_urls: [imageUrl],
+        public_image_url: imageUrls[0],
+        public_content_image_urls: imageUrls,
         public_cta_image_url: ctaImageUrl,
         instagram_cta_path: cta.relative_path,
         missing_meta_settings: instagram.missing
       });
-      console.log(JSON.stringify({ site_published: true, instagram_published: false, missing_meta_settings: instagram.missing, git_commit: commit, public_image_url: imageUrl }, null, 2));
+      console.log(JSON.stringify({ site_published: true, instagram_published: false, missing_meta_settings: instagram.missing, git_commit: commit, public_image_url: imageUrls[0], public_image_urls: imageUrls }, null, 2));
       return;
     }
     const published = await updateState(draft.run_id, "instagram_published", {
       post_id: draft.post_id,
+      ...metadata,
       git_commit: commit,
-      public_image_url: imageUrl,
-      public_content_image_urls: [imageUrl],
+      public_image_url: imageUrls[0],
+      public_content_image_urls: imageUrls,
       public_cta_image_url: ctaImageUrl,
       instagram_cta_path: cta.relative_path,
       instagram_child_container_ids: instagram.child_container_ids,
@@ -1081,19 +1194,18 @@ async function commandComplete() {
       site_published: true,
       instagram_published: true,
       git_commit: commit,
-      public_image_url: imageUrl,
+      public_image_url: imageUrls[0],
+      public_image_urls: imageUrls,
       instagram_performance_update: published.performance_report || null,
       ...instagram
     }, null, 2));
   } catch (error) {
-    if (siteWritten && !commitCreated) {
-      await copyFile(backupPrompts, promptsPath);
-      await rm(finalImagePath, { force: true });
+    if (!commitCreated) {
+      if (siteWritten) await copyFile(backupPrompts, promptsPath);
+      for (const path of copiedImagePaths) await rm(path, { force: true });
       await updateState(draft.run_id, "failed", { post_id: draft.post_id, reason: error.message, rolled_back: true });
-    } else if (commitCreated) {
-      await appendLog(draft.run_id, "recoverable_failure", { reason: error.message, rolled_back: false });
     } else {
-      await updateState(draft.run_id, "failed", { post_id: draft.post_id, reason: error.message, rolled_back: false });
+      await appendLog(draft.run_id, "recoverable_failure", { reason: error.message, rolled_back: false });
     }
     throw error;
   }
@@ -1159,6 +1271,8 @@ async function commandTest() {
   if (summary.duplicate_ids.length) failures.push(`중복 ID: ${summary.duplicate_ids.join(", ")}`);
   if (!/^P-\d{3,}$/.test(summary.next_id)) failures.push("다음 ID 형식 오류");
   if (!(await exists(referencePath))) failures.push(`${accountConfig.displayName} 기준 이미지 없음`);
+  const ownerReference = await ownerReferenceStatus();
+  if (accountConfig.accountKey === "kongi" && !ownerReference.available) failures.push(`콩이 보호자 reference 없음 또는 손상: ${ownerReference.error || "unavailable"}`);
   try { parsePromptsSource(source); } catch (error) { failures.push(`JavaScript 파싱 실패: ${error.message}`); }
   for (const item of PROMPTS) {
     if (!item.id || !item.title || !item.category) failures.push(`${item.id || "unknown"}: 필수 데이터 누락`);
@@ -1243,6 +1357,8 @@ async function commandTest() {
       display_name: accountConfig.displayName,
       animal: accountConfig.animal,
       reference_exists: await exists(referencePath),
+      owner_reference_path: ownerReference.path,
+      owner_reference_available: ownerReference.available,
       instagram_cta_path: ctaRelativePath,
       instagram_cta_exists: await exists(instagramCtaPath()),
       credentials_configured: Boolean(credentials.userId && credentials.accessToken),

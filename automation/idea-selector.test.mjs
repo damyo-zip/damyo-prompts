@@ -14,6 +14,9 @@ function config(overrides = {}) {
     minEvidence: 50,
     allowDeclining: false,
     duplicateThreshold: 0.72,
+    ownerRequiredEnabled: false,
+    carouselIdeasEnabled: false,
+    ownerOptionalPolicy: "omit",
     ...overrides
   };
 }
@@ -30,6 +33,12 @@ function concept(overrides = {}) {
     evidence_strength: 89,
     trend_momentum: "rising",
     publishable: true,
+    owner_mode: "none",
+    owner_requirement_reason: "",
+    post_format: "single",
+    carousel_fit_score: 0,
+    preferred_slide_count: 1,
+    carousel_reason: "",
     keywords: ["doorway", "cameo", "horror"],
     ...overrides
   };
@@ -126,12 +135,104 @@ test("selection log metadata records source and fallback state", async () => {
     total: 94.3,
     evidence: 89,
     momentum: "rising",
+    owner_mode: "none",
+    owner_asset_available: false,
+    owner_asset_used: false,
+    post_format: "single",
+    content_slides: 1,
     fallback_used: false,
     fallback_reason: null,
     selection_enabled: true,
     skipped_candidates: [],
     radar_error: null
   });
+});
+
+test("owner_mode none never uses an available owner reference", async () => {
+  const selected = await selectIdeaSource({
+    accountName: "kongi",
+    config: config({ ownerRequiredEnabled: true }),
+    ownerAssetAvailable: true,
+    trendProvider: async () => ({ concepts: [concept({ owner_mode: "none" })] })
+  });
+  assert.equal(selected.owner_mode, "none");
+  assert.equal(selected.owner_asset_available, true);
+  assert.equal(selected.owner_asset_used, false);
+});
+
+test("owner_mode optional always omits an available owner reference", async () => {
+  const selected = await selectIdeaSource({
+    accountName: "kongi",
+    config: config({ ownerRequiredEnabled: true }),
+    ownerAssetAvailable: true,
+    trendProvider: async () => ({ concepts: [concept({ owner_mode: "optional" })] })
+  });
+  assert.equal(selected.owner_mode, "optional");
+  assert.equal(selected.owner_asset_used, false);
+});
+
+test("owner_mode required uses the available owner reference", async () => {
+  const selected = await selectIdeaSource({
+    accountName: "kongi",
+    config: config({ ownerRequiredEnabled: true }),
+    ownerAssetAvailable: true,
+    trendProvider: async () => ({ concepts: [concept({ owner_mode: "required", owner_requirement_reason: "human-pet comparison" })] })
+  });
+  assert.equal(selected.owner_mode, "required");
+  assert.equal(selected.owner_asset_used, true);
+});
+
+test("required owner candidate without an asset is skipped for the next trend", async () => {
+  const required = concept({ owner_mode: "required", total_score: 99 });
+  const petOnly = concept({ concept_id: "trend-2", title: "Pet only", total_score: 90 });
+  const selected = await selectIdeaSource({
+    accountName: "kongi",
+    config: config({ ownerRequiredEnabled: true }),
+    ownerAssetAvailable: false,
+    trendProvider: async () => ({ concepts: [required, petOnly] })
+  });
+  assert.equal(selected.trend_concept_id, "trend-2");
+  assert.deepEqual(selected.skipped_candidates[0].reasons, ["OWNER_REFERENCE_UNAVAILABLE"]);
+});
+
+test("all required owner candidates without an asset fall back", async () => {
+  const selected = await selectIdeaSource({
+    accountName: "kongi",
+    config: config({ ownerRequiredEnabled: true }),
+    ownerAssetAvailable: false,
+    trendProvider: async () => ({ concepts: [concept({ owner_mode: "required" })] })
+  });
+  assert.equal(selected.idea_source, "fallback_generator");
+  assert.equal(selected.fallback_reason, "owner_reference_unavailable");
+});
+
+test("carousel metadata is activated only when its Kongi feature flag is on", async () => {
+  const carouselConcept = concept({ post_format: "carousel", carousel_fit_score: 95, preferred_slide_count: 4 });
+  const disabled = await selectIdeaSource({
+    accountName: "kongi",
+    config: config(),
+    trendProvider: async () => ({ concepts: [carouselConcept] })
+  });
+  const enabled = await selectIdeaSource({
+    accountName: "kongi",
+    config: config({ carouselIdeasEnabled: true }),
+    trendProvider: async () => ({ concepts: [carouselConcept] })
+  });
+  assert.equal(disabled.post_format, "single");
+  assert.equal(enabled.post_format, "carousel");
+  assert.equal(enabled.preferred_slide_count, 4);
+});
+
+test("feature flags off preserve the existing pet-only single path", async () => {
+  const selected = await selectIdeaSource({
+    accountName: "kongi",
+    config: config(),
+    ownerAssetAvailable: true,
+    trendProvider: async () => ({ concepts: [concept({ owner_mode: "required", post_format: "carousel", preferred_slide_count: 4 })] })
+  });
+  assert.equal(selected.owner_mode, "none");
+  assert.equal(selected.owner_asset_used, false);
+  assert.equal(selected.post_format, "single");
 });
 
 test("selection and fallback paths never attempt Instagram posting", async () => {

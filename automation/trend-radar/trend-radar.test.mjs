@@ -302,6 +302,27 @@ test("original trend and pet adaptation remain explicitly separated", () => {
   assert.notEqual(analyzed.original_trend, analyzed.pet_adaptation);
 });
 
+test("Trend Radar adds conservative owner and carousel metadata", () => {
+  const analyzed = analyzeCandidate(candidate("Retro direct flash photo dump"));
+  assert.equal(analyzed.owner_mode, "optional");
+  assert.equal(analyzed.post_format, "carousel");
+  assert.equal(analyzed.preferred_slide_count, 4);
+  assert.ok(analyzed.carousel_fit_score >= 80);
+});
+
+test("direct owner-pet comparison is the only kind marked owner required", () => {
+  const analyzed = analyzeCandidate(candidate("Owner and pet matching pose comparison portrait"));
+  assert.equal(analyzed.owner_mode, "required");
+  assert.match(analyzed.owner_requirement_reason, /human-pet comparison/i);
+});
+
+test("ordinary pet concepts keep owner none and single defaults", () => {
+  const analyzed = analyzeCandidate(candidate("Pet fashion magazine cover portrait"));
+  assert.equal(analyzed.owner_mode, "none");
+  assert.equal(analyzed.post_format, "single");
+  assert.equal(analyzed.preferred_slide_count, 1);
+});
+
 test("hallucinated original trend without source grounding is rejected", () => {
   const fabricated = {
     concept_id: "fake",

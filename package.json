@@ -22,6 +22,7 @@
     "trend:shadow": "node automation/trend-radar/runner.mjs --shadow --account kongi",
     "trend:test": "node --test automation/trend-radar/trend-radar.test.mjs",
     "selection:test": "node --test automation/idea-selector.test.mjs",
-    "test": "node automation/run.mjs test kongi && node automation/run.mjs test hamnimi && node --test automation/trend-radar/trend-radar.test.mjs automation/idea-selector.test.mjs"
+    "experience:test": "node --test automation/content-experience.test.mjs",
+    "test": "node automation/run.mjs test kongi && node automation/run.mjs test hamnimi && node --test automation/trend-radar/trend-radar.test.mjs automation/idea-selector.test.mjs automation/content-experience.test.mjs"
   }
 }

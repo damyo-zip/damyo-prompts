@@ -3,6 +3,7 @@ export default {
   displayName: "콩이",
   animal: "dog",
   referenceFile: "kongi.png",
+  ownerReferenceFile: "kongi-owner.png",
   instagramCtaImage: "automation/assets/kongi-profile-cta.jpg",
   instagram: {
     userIdEnv: "KONGI_INSTAGRAM_USER_ID",
@@ -11,6 +12,7 @@ export default {
     legacyAccessTokenEnv: "INSTAGRAM_ACCESS_TOKEN"
   },
   identityGuidance: "순백색 털, 둥근 얼굴, 큰 짙은 눈, 작은 검은 코, 짧은 주둥이와 부드럽게 처진 귀를 같은 개체처럼 유지",
+  ownerIdentityGuidance: "긴 갈색 웨이브 머리와 앞머리, 부드러운 타원형 얼굴, 짙은 눈, 자연스러운 이목구비와 전체 인상을 같은 인물처럼 유지",
   ideaGuidance: [
     "기존 강아지 콘텐츠와 겹치지 않는 상황과 구도를 우선한다.",
     "보호자가 자기 강아지 사진으로 따라 만들고 싶을 만큼 장면이 명확해야 한다.",
