@@ -36,7 +36,9 @@ npm run trend:test
 
 각 최종 컨셉은 `original_trend`, `pet_adaptation`, `source_evidence`, `independent_source_count`, `recent_source_count_7d`, `recent_source_count_30d`, `cross_platform_count`, `latest_source_date`, `evidence_strength`, `weak_signal`, `trend_momentum`을 포함합니다.
 
-또한 Kongi 실행 형식을 위한 `owner_mode`, `owner_requirement_reason`, `post_format`, `carousel_fit_score`, `preferred_slide_count`, `carousel_reason`, `carousel_storyboard_type`을 포함합니다. 기본값은 `none + single`입니다. 보호자가 없으면 직접 비교·같은 자세·split-face 같은 핵심 아이디어가 성립하지 않는 명시적 human-pet 비교 컨셉만 `required`로 표시합니다. 여행·생활 스냅처럼 보호자 없이도 성립하면 `optional` 또는 `none`이며 실제 운영에서는 둘 다 보호자를 생략합니다.
+또한 Kongi와 Hamnimi 실행 형식을 위한 `owner_mode`, `owner_requirement_reason`, `post_format`, `carousel_fit_score`, `preferred_slide_count`, `carousel_reason`, `carousel_storyboard_type`을 포함합니다. 기본값은 `none + single`입니다. 보호자가 없으면 직접 비교·같은 자세·split-face 같은 핵심 아이디어가 성립하지 않는 명시적 human-pet 비교 컨셉만 `required`로 표시합니다. 여행·생활 스냅처럼 보호자 없이도 성립하면 `optional` 또는 `none`이며 실제 운영에서는 둘 다 보호자를 생략합니다.
+
+Hamnimi 결과는 `hamster_fit_score`로 다시 점수화하며, 단순 동물명 치환 대신 작은 체구·볼살·미니 소품·이중 스케일 대비가 시각적 장점이 되는 account-specific adaptation을 우선합니다. 대형 동물이 도시를 걷는 구도처럼 햄스터 스케일에 부자연스러운 유형은 Hamnimi fit을 낮게 평가합니다. 성과 점수는 `account_performance.json.accounts.<account>` namespace에서 분리해 읽습니다.
 
 Carousel은 photo dump, mini-magazine, then-vs-now, 시간 흐름, 단계적 reveal처럼 여러 장이 시각적 핵심을 명확히 강화할 때만 선택합니다. 단순히 여러 장으로 만들 수 있다는 이유만으로 carousel을 지정하지 않으며 기본 content slide 수는 4장입니다.
 
@@ -98,7 +100,7 @@ if (result.ok) {
 
 ## Windows 자동 실행
 
-Windows Task Scheduler 작업 `Damyo Trend Radar`가 로컬 시간 기준 매일 `08:30`, `20:30`에 Trend Radar refresh와 Kongi shadow 기록을 차례로 실행합니다. 작업은 Instagram 게시, 이미지·caption 생성, GitHub asset push 또는 Meta API를 호출하지 않습니다.
+Windows Task Scheduler 작업 `Damyo Trend Radar`가 로컬 시간 기준 매일 `08:30`, `20:30`에 Trend Radar refresh 한 번과 Kongi/Hamnimi shadow를 차례로 실행합니다. multi-account shadow runner는 한 계정 실패를 격리하고 다음 계정을 계속 처리합니다. 작업은 Instagram 게시, 이미지·caption 생성, GitHub asset push 또는 Meta API를 호출하지 않습니다.
 
 - wrapper: `automation/scheduler/run-trend-radar.ps1`
 - 등록 스크립트: `automation/scheduler/register-trend-radar-task.ps1`
@@ -124,7 +126,7 @@ Unregister-ScheduledTask -TaskName "Damyo Trend Radar" -Confirm:$false
 
 작업은 놓친 예약을 가능한 한 빨리 실행(`StartWhenAvailable`), 이미 실행 중이면 새 instance 무시(`IgnoreNew`), PC 깨우기 비활성으로 등록됩니다. wrapper도 파일 잠금을 사용하며 refresh가 실패해도 shadow가 유효 캐시로 실행될 수 있도록 계속 진행합니다. shadow까지 실패하면 게시 파이프라인에 진입하지 않고 오류 로그와 nonzero exit code만 남깁니다.
 
-## Kongi 1단계 실제 선택 연결
+## 계정별 실제 선택 연결
 
 `automation/idea-selector.mjs`가 preflight의 아이디어 출처를 결정합니다. 기본값은 OFF이며 다음 설정을 사용합니다.
 
@@ -137,6 +139,9 @@ TREND_RADAR_DUPLICATE_THRESHOLD=0.72
 KONGI_OWNER_REQUIRED_ENABLED=false
 KONGI_CAROUSEL_IDEAS_ENABLED=false
 KONGI_OWNER_OPTIONAL_POLICY=omit
+HAMNIMI_OWNER_REQUIRED_ENABLED=false
+HAMNIMI_CAROUSEL_IDEAS_ENABLED=false
+HAMNIMI_OWNER_OPTIONAL_POLICY=omit
 ```
 
-ON 상태에서도 코드상 실제 선택 허용 계정은 `kongi`뿐입니다. publishable, 최소 Evidence, declining 정책과 최근 30개/60일 게시물 의미 중복 검사를 통과한 뒤 owner-required 후보는 owner reference 가용성까지 확인합니다. 사용할 수 없는 required 후보는 건너뛰고 다음 후보를 검사합니다. Carousel flag가 꺼져 있거나 metadata가 없는 concept은 기존 single 경로를 유지합니다. 조건 미달이나 오류는 기존 generator로 fallback하며 Hamnimi 정책은 바뀌지 않습니다.
+코드상 실제 선택 허용 계정은 `kongi`, `hamnimi`이며 실제 활성 계정은 `TREND_RADAR_SELECTION_ACCOUNTS`에서 독립적으로 정합니다. publishable, 최소 Evidence, declining 정책과 계정별 최근 30개/60일 게시물 의미 중복 검사를 통과한 뒤 owner-required 후보는 공통 owner reference 가용성까지 확인합니다. 사용할 수 없는 required 후보는 건너뛰고 다음 후보를 검사합니다. 계정별 Carousel flag가 꺼져 있거나 metadata가 없는 concept은 기존 single 경로를 유지합니다. 조건 미달이나 오류는 해당 계정의 기존 generator로 fallback합니다.

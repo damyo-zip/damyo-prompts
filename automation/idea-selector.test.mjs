@@ -65,15 +65,15 @@ test("Kongi falls back when no publishable candidate exists", async () => {
   assert.equal(selected.fallback_reason, "no_publishable_concept");
 });
 
-test("Hamnimi stays on the existing generator even when configured", async () => {
+test("Hamnimi can use Trend Radar when explicitly configured", async () => {
   let providerCalled = false;
   const selected = await selectIdeaSource({
     accountName: "hamnimi",
     config: config({ accounts: ["kongi", "hamnimi"] }),
     trendProvider: async () => { providerCalled = true; return { concepts: [concept()] }; }
   });
-  assert.equal(providerCalled, false);
-  assert.equal(selected.fallback_reason, "account_not_supported");
+  assert.equal(providerCalled, true);
+  assert.equal(selected.idea_source, "trend_radar");
 });
 
 test("declining candidates are skipped by default", async () => {

@@ -135,7 +135,7 @@ const conceptRules = [
     description: "의도적인 흔들림, 빛의 궤적과 순간 포착으로 영화 스틸처럼 보이는 사진",
     adaptation: "밤 산책 중 반려동물은 또렷하게 남고 배경만 흐르는 역동적인 영화 스냅",
     scores: [93, 91, 98, 87],
-    fits: [94, 94, 90]
+    fits: [94, 94, 74]
   },
   {
     key: "fashion-magazine-cover",
@@ -243,7 +243,7 @@ const conceptRules = [
     description: "평범한 장소를 와이드 구도, 대기 원근감, 영화 색보정으로 서사적인 여행지로 보이게 하는 사진",
     adaptation: "반려동물이 낯선 도시의 주인공처럼 걷는 와이드 영화 포스터형 여행사진",
     scores: [90, 97, 95, 94],
-    fits: [97, 96, 91]
+    fits: [97, 96, 68]
   },
   {
     key: "parallel-self-swap",
@@ -257,8 +257,8 @@ const conceptRules = [
   {
     key: "owner-pet-visual-comparison",
     patterns: [
-      /(?:owner|human|person).{0,30}(?:pet|dog|cat).{0,30}(?:comparison|lookalike|split.face|matching pose|mirror pose)/i,
-      /(?:pet|dog|cat).{0,30}(?:owner|human|person).{0,30}(?:comparison|lookalike|split.face|matching pose|mirror pose)/i
+      /(?:owner|human|person).{0,30}(?:pet|dog|cat|hamster).{0,30}(?:comparison|lookalike|split.face|matching pose|mirror pose)/i,
+      /(?:pet|dog|cat|hamster).{0,30}(?:owner|human|person).{0,30}(?:comparison|lookalike|split.face|matching pose|mirror pose)/i
     ],
     title: "Owner-Pet Visual Comparison",
     description: "보호자와 반려동물의 얼굴, 표정 또는 같은 자세를 직접 비교해야 의미가 완성되는 관계형 초상",

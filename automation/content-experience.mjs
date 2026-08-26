@@ -1,5 +1,6 @@
 const OWNER_MODES = new Set(["none", "optional", "required"]);
 const POST_FORMATS = new Set(["single", "carousel"]);
+const EXPERIENCE_ACCOUNTS = new Set(["kongi", "hamnimi"]);
 const DEFAULT_CAROUSEL_SLIDES = 4;
 const MIN_CAROUSEL_SLIDES = 3;
 const MAX_CAROUSEL_SLIDES = 5;
@@ -27,10 +28,11 @@ function boundedSlideCount(value, fallback = DEFAULT_CAROUSEL_SLIDES) {
   return Math.max(MIN_CAROUSEL_SLIDES, Math.min(MAX_CAROUSEL_SLIDES, parsed));
 }
 
-function experienceConfigFromEnv(env = process.env) {
+function experienceConfigFromEnv(env = process.env, accountName = "kongi") {
+  const prefix = String(accountName || "kongi").trim().toUpperCase();
   return {
-    ownerRequiredEnabled: booleanValue(env.KONGI_OWNER_REQUIRED_ENABLED, false),
-    carouselIdeasEnabled: booleanValue(env.KONGI_CAROUSEL_IDEAS_ENABLED, false),
+    ownerRequiredEnabled: booleanValue(env[`${prefix}_OWNER_REQUIRED_ENABLED`], false),
+    carouselIdeasEnabled: booleanValue(env[`${prefix}_CAROUSEL_IDEAS_ENABLED`], false),
     ownerOptionalPolicy: "omit"
   };
 }
@@ -52,15 +54,17 @@ function normalizeConceptExperience(concept = {}) {
 function resolveConceptExperience({
   concept = {},
   accountName = "kongi",
-  config = experienceConfigFromEnv(),
+  config = experienceConfigFromEnv(process.env, accountName),
   ownerAssetAvailable = false
 } = {}) {
   const declared = normalizeConceptExperience(concept);
-  const supportedAccount = String(accountName).toLowerCase() === "kongi";
+  const account = String(accountName).toLowerCase();
+  const supportedAccount = EXPERIENCE_ACCOUNTS.has(account);
   const ownerMode = supportedAccount && config.ownerRequiredEnabled ? declared.owner_mode : "none";
   const postFormat = supportedAccount && config.carouselIdeasEnabled ? declared.post_format : "single";
   const ownerAssetUsed = ownerMode === "required" && Boolean(ownerAssetAvailable);
   return {
+    account,
     declared_owner_mode: declared.owner_mode,
     owner_mode: ownerMode,
     owner_requirement_reason: ownerMode === "required" ? declared.owner_requirement_reason : "",
@@ -79,6 +83,14 @@ function resolveConceptExperience({
       carousel_ideas_enabled: supportedAccount && Boolean(config.carouselIdeasEnabled)
     }
   };
+}
+
+function adaptationForAccount(concept, accountName) {
+  const account = String(accountName || "").toLowerCase();
+  if (account === "hamnimi") {
+    return concept.hamster_adaptation || concept.pet_adaptation || concept.adaptation || concept.description || concept.title;
+  }
+  return concept.dog_adaptation || concept.pet_adaptation || concept.adaptation || concept.description || concept.title;
 }
 
 function storyboardRoles(count) {
@@ -132,7 +144,7 @@ function buildCarouselStoryboard(concept, experience) {
   if (experience.post_format !== "carousel") return [];
   const count = boundedSlideCount(experience.preferred_slide_count);
   const roles = storyboardRoles(count);
-  const baseScene = concept.dog_adaptation || concept.pet_adaptation || concept.adaptation || concept.description || concept.title || "반려동물 컨셉";
+  const baseScene = adaptationForAccount(concept, experience.account) || "반려동물 컨셉";
   return roles.map((role, index) => ({
     slide: index + 1,
     role,
@@ -168,8 +180,8 @@ function validateDraftExperience(draft, { accountName = "kongi" } = {}) {
   const postFormat = draft.post_format == null ? "single" : draft.post_format;
   if (!OWNER_MODES.has(ownerMode)) throw new Error("draft.owner_mode는 none, optional, required 중 하나여야 합니다.");
   if (!POST_FORMATS.has(postFormat)) throw new Error("draft.post_format은 single 또는 carousel이어야 합니다.");
-  if (String(accountName).toLowerCase() !== "kongi" && (ownerMode !== "none" || postFormat !== "single")) {
-    throw new Error("owner/carousel 아이디어 확장은 현재 kongi에만 지원됩니다.");
+  if (!EXPERIENCE_ACCOUNTS.has(String(accountName).toLowerCase()) && (ownerMode !== "none" || postFormat !== "single")) {
+    throw new Error("owner/carousel 아이디어 확장은 지원되는 계정에서만 사용할 수 있습니다.");
   }
   const ownerAssetUsed = draft.owner_asset_used === true;
   if (ownerMode !== "required" && ownerAssetUsed) throw new Error("owner asset은 owner_mode=required일 때만 사용할 수 있습니다.");
@@ -270,6 +282,7 @@ function validateReviewPackage(draft, reviews, { accountName = "kongi", accountK
 
 export {
   DEFAULT_CAROUSEL_SLIDES,
+  EXPERIENCE_ACCOUNTS,
   MAX_CAROUSEL_SLIDES,
   MIN_CAROUSEL_SLIDES,
   OWNER_MODES,

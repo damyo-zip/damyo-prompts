@@ -128,12 +128,22 @@ function publicConcept(concept) {
   };
 }
 
+function applyAccountPerformance(concepts, performanceScores = { defaultScore: 50, concepts: {} }) {
+  return (concepts || []).map(concept => ({
+    ...concept,
+    performance_potential: Number(
+      performanceScores.concepts?.[concept.concept_key] ?? performanceScores.defaultScore ?? 50
+    )
+  }));
+}
+
 async function analyzeAndScore(candidates, { config, accountName, now = new Date(), postHistory = [], historyData = { selections: [], snapshots: [] }, performanceScores = { defaultScore: 50, concepts: {} } }) {
   const rawClusters = clusterCandidates(candidates);
   const evidenceResults = rawClusters.map(concept => validateTrendEvidence(concept, { config, now, historyData }));
   const invalidEvidence = evidenceResults.filter(result => !result.valid);
   const clusters = evidenceResults.filter(result => result.valid).map(result => adaptConcept(result.concept, accountName));
   const recentTrendSelections = (historyData.selections || [])
+    .filter(item => !item.account_name || item.account_name === accountName)
     .filter(item => now.getTime() - new Date(item.selected_at).getTime() <= config.recentPostDays * 86_400_000)
     .map(item => ({ concept_title: item.concept_title }));
   const relevantPosts = postHistory.filter(post => !post.account_key || post.account_key === accountName);
@@ -174,8 +184,9 @@ async function runTrendRadar({
 } = {}) {
   if (!forceRefresh && !inputCandidates && await cacheIsFresh(config, now)) {
     const cached = await loadCachedConcepts(config);
+    const performanceScores = await loadPerformanceScores(config, accountName);
     await appendRadarLog(config, "cache_hit", { account_name: accountName, concept_count: cached.concepts.length }, now);
-    return { ...cached, cache_hit: true };
+    return { ...cached, concepts: applyAccountPerformance(cached.concepts, performanceScores), cache_hit: true };
   }
 
   const paths = dataPaths(config);
@@ -320,6 +331,27 @@ async function executeShadowMode({
   };
 }
 
+async function executeShadowAccounts({
+  accountNames = ["kongi", "hamnimi"],
+  executeAccount = accountName => executeShadowMode({ accountName })
+} = {}) {
+  const accounts = [];
+  for (const accountName of accountNames) {
+    try {
+      accounts.push({ account: accountName, ok: true, shadow: await executeAccount(accountName), error: null });
+    } catch (error) {
+      accounts.push({ account: accountName, ok: false, shadow: null, error: error.message });
+    }
+  }
+  return {
+    mode: "multi_account_shadow",
+    instagram_posting_attempted: false,
+    accounts,
+    success_count: accounts.filter(item => item.ok).length,
+    failure_count: accounts.filter(item => !item.ok).length
+  };
+}
+
 async function resolveIdeaWithTrendRadar({ accountName, legacyIdea = null, radar = getBestTrendForAccount, radarOptions = {} }) {
   try {
     const trend = await radar(accountName, radarOptions);
@@ -418,6 +450,33 @@ async function main() {
     inputCandidates: fixture?.candidates || fixture
   };
   if (process.argv.includes("--shadow")) {
+    const accountList = option("--accounts", "")
+      .split(",")
+      .map(value => value.trim().toLowerCase())
+      .filter(Boolean);
+    if (accountList.length) {
+      const multi = await executeShadowAccounts({
+        accountNames: accountList,
+        executeAccount: account => executeShadowMode({ accountName: account, radarOptions })
+      });
+      for (const outcome of multi.accounts) {
+        if (!outcome.ok) {
+          console.error(`SHADOW ${outcome.account} FAILED: ${outcome.error}`);
+          continue;
+        }
+        printTopConcepts(outcome.shadow.result, Number(option("--limit", 10)), { showEvidence: process.argv.includes("--show-evidence") });
+        printShadowSummary(outcome.shadow);
+      }
+      console.log(JSON.stringify({
+        mode: multi.mode,
+        accounts: multi.accounts.map(item => ({ account: item.account, ok: item.ok, error: item.error })),
+        success_count: multi.success_count,
+        failure_count: multi.failure_count,
+        instagram_posting_attempted: false
+      }, null, 2));
+      if (!multi.success_count) process.exitCode = 1;
+      return;
+    }
     const shadow = await executeShadowMode({ accountName, radarOptions });
     printTopConcepts(shadow.result, Number(option("--limit", 10)), { showEvidence: process.argv.includes("--show-evidence") });
     printShadowSummary(shadow);
@@ -437,8 +496,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 
 export {
   analyzeAndScore,
+  applyAccountPerformance,
   collectCandidates,
   executeShadowMode,
+  executeShadowAccounts,
   formatMomentum,
   getBestTrendForAccount,
   prepareResultForAccount,

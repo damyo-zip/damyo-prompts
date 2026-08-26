@@ -152,8 +152,9 @@ test("carousel draft requires ordered 3 to 5 slide storyboard", () => {
   assert.throws(() => validateDraftExperience(carouselDraft({ slides: [] }), { accountName: "kongi" }), /3~5/);
 });
 
-test("Hamnimi cannot enable owner or carousel draft metadata", () => {
-  assert.throws(() => validateDraftExperience(carouselDraft(), { accountName: "hamnimi" }), /kongi/);
+test("Hamnimi supports the shared owner and carousel draft metadata", () => {
+  const draft = carouselDraft({ account_key: "hamnimi" });
+  assert.equal(validateDraftExperience(draft, { accountName: "hamnimi" }).post_format, "carousel");
 });
 
 test("single review keeps the existing validation thresholds", () => {

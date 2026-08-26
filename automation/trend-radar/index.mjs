@@ -1,1 +1,1 @@
-export { getBestTrendForAccount, prepareResultForAccount, resolveIdeaWithTrendRadar, runTrendRadar } from "./runner.mjs";
+export { executeShadowAccounts, getBestTrendForAccount, prepareResultForAccount, resolveIdeaWithTrendRadar, runTrendRadar } from "./runner.mjs";

@@ -78,11 +78,14 @@ function Write-RadarSummary {
       Write-Log "Collector failures | count=$($collectorErrors.Count) | $($collectorErrors -join ' ; ')"
     }
 
-    if ($null -ne $summary.shadow) {
-      $shadow = $summary.shadow
-      Write-Log "Kongi shadow | Concept=$($shadow.selected_concept) | Total=$($shadow.total_score) | Evidence=$($shadow.evidence_strength) | Momentum=$($shadow.trend_momentum) | Publishable=$($shadow.publishable_count) | run_at=$($shadow.run_at)"
-    } else {
-      Write-Log "Kongi shadow unavailable | no Kongi shadow record"
+    foreach ($account in @("kongi", "hamnimi")) {
+      $shadow = $summary.shadows.$account
+      $label = if ($account -eq "kongi") { "Kongi" } else { "Hamnimi" }
+      if ($null -ne $shadow) {
+        Write-Log "$label shadow | Concept=$($shadow.selected_concept) | Total=$($shadow.total_score) | Evidence=$($shadow.evidence_strength) | Momentum=$($shadow.trend_momentum) | Publishable=$($shadow.publishable_count) | run_at=$($shadow.run_at)"
+      } else {
+        Write-Log "$label shadow unavailable | no $label shadow record"
+      }
     }
   } catch {
     Write-Log "Radar summary unavailable | $($_.Exception.Message)"
@@ -101,7 +104,7 @@ try {
 }
 
 try {
-  Write-Log "Run started | project=$ProjectRoot | account=kongi"
+  Write-Log "Run started | project=$ProjectRoot | accounts=kongi,hamnimi"
   Set-Location -LiteralPath $ProjectRoot
 
   $npm = Get-Command npm.cmd -ErrorAction Stop

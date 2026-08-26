@@ -316,6 +316,11 @@ test("direct owner-pet comparison is the only kind marked owner required", () =>
   assert.match(analyzed.owner_requirement_reason, /human-pet comparison/i);
 });
 
+test("direct owner-hamster comparison is marked owner required", () => {
+  const analyzed = analyzeCandidate(candidate("Owner and hamster matching pose comparison portrait"));
+  assert.equal(analyzed.owner_mode, "required");
+});
+
 test("ordinary pet concepts keep owner none and single defaults", () => {
   const analyzed = analyzeCandidate(candidate("Pet fashion magazine cover portrait"));
   assert.equal(analyzed.owner_mode, "none");

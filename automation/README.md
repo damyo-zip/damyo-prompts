@@ -7,7 +7,7 @@
 | `kongi` | 콩이 | `dog` | `automation/reference/kongi.png` |
 | `hamnimi` | 햄님이 | `small` | `automation/reference/hamnimi.png` |
 
-Kongi의 생성형 보호자 reference는 `automation/reference/kongi-owner.png`에 둡니다. 이 파일은 `owner_mode: "required"`인 Kongi 컨셉에서만 generation reference로 전달하며 `optional`과 `none`에서는 존재 여부와 무관하게 사용하지 않습니다. Hamnimi에는 owner/carousel 확장을 적용하지 않습니다.
+공통 생성형 보호자 reference는 `automation/reference/kongi-owner.png`에 둡니다. 파일명은 기존 Kongi 경로를 유지하지만 같은 AI 캐릭터를 두 계정이 중복 없이 공유합니다. 각 계정에서 `owner_mode: "required"`인 컨셉에만 generation reference로 전달하며 `optional`과 `none`에서는 존재 여부와 무관하게 사용하지 않습니다.
 
 운영 명령은 계정별로 분리됩니다.
 
@@ -31,9 +31,9 @@ npm run trend:evidence
 npm run trend:test
 ```
 
-`preflight` 결과의 `trend_radar.concept`는 현재 계정의 추천 아이디어입니다. `TREND_RADAR_ENABLE_SELECTION=true`이면 1단계 운영 대상인 `kongi`에서만 publishable·Evidence·Momentum·최근 중복 조건을 다시 통과한 최상위 후보가 `selected_idea`와 실제 `idea_guidance`가 됩니다. `hamnimi`는 flag 설정과 무관하게 기존 generator 흐름을 유지합니다. 비활성화·미지원 계정·조건 미달·Radar 오류는 `idea_source: "fallback_generator"`와 원래 `idea_guidance`로 안전하게 복귀합니다. 상세 구조는 `automation/trend-radar/README.md`를 참고합니다.
+`preflight` 결과의 `trend_radar.concept`는 현재 계정의 추천 아이디어입니다. `TREND_RADAR_ENABLE_SELECTION=true`이고 현재 계정이 `TREND_RADAR_SELECTION_ACCOUNTS`에 있으면 publishable·Evidence·Momentum·해당 계정 최근 게시물 중복 조건을 다시 통과한 최상위 후보가 `selected_idea`와 실제 `idea_guidance`가 됩니다. Hamnimi는 `hamster_fit_score`로 다시 점수화하고 작은 체구와 이중 스케일 대비가 장점이 되는 별도 `hamster_adaptation`을 사용합니다. 비활성화·미지원 계정·조건 미달·Radar 오류는 `idea_source: "fallback_generator"`와 원래 `idea_guidance`로 안전하게 복귀합니다. 상세 구조는 `automation/trend-radar/README.md`를 참고합니다.
 
-Kongi 전용 실행 정책은 `KONGI_OWNER_REQUIRED_ENABLED`, `KONGI_CAROUSEL_IDEAS_ENABLED`로 각각 켭니다. 기본값은 기존 동작 보존을 위해 OFF입니다. `KONGI_OWNER_OPTIONAL_POLICY=omit`은 고정 정책이며 optional owner를 실제 generation reference에서 항상 제외합니다. owner-required 후보인데 reference가 없거나 손상되면 다음 publishable 후보를 검사하고, 모두 실행 불가능하면 기존 generator로 fallback합니다.
+계정별 실행 정책은 `KONGI_*`와 `HAMNIMI_*` owner/carousel flag로 독립 제어합니다. 기본값은 기존 동작 보존을 위해 모두 OFF입니다. `*_OWNER_OPTIONAL_POLICY=omit`은 고정 정책이며 optional owner를 실제 generation reference에서 항상 제외합니다. owner-required 후보인데 reference가 없거나 손상되면 해당 계정의 다음 publishable 후보를 검사하고, 모두 실행 불가능하면 기존 generator로 fallback합니다.
 
 ## 최초 설정
 
@@ -84,9 +84,9 @@ preflight의 `owner_mode`, `owner_asset_available`, `owner_asset_used`, `post_fo
 
 ### 3. Codex 기본 이미지 생성과 시각 검수
 
-기본적으로 `automation/reference/kongi.png`만 reference image로 사용합니다. preflight가 `owner_asset_used: true`라고 명시한 owner-required Kongi 컨셉에서만 `automation/reference/kongi-owner.png`를 함께 사용합니다. Optional과 none에서는 owner reference를 전달하거나 결과에 보호자를 등장시키지 않습니다.
+기본적으로 현재 계정의 canonical reference(`kongi.png` 또는 `hamnimi.png`)만 사용합니다. preflight가 `owner_asset_used: true`라고 명시한 owner-required 컨셉에서만 공통 `kongi-owner.png`를 함께 사용합니다. Optional과 none에서는 owner reference를 전달하거나 결과에 보호자를 등장시키지 않습니다.
 
-Single은 기존처럼 세로 4:5 이미지 한 장을 생성합니다. Carousel은 slide 1에 Kongi reference(필요 시 owner reference)를 사용하고, slide 2~4에는 같은 canonical reference와 통과한 slide 1 anchor를 함께 참고해 identity와 visual language를 유지합니다. 생성물은 `<run_dir>/slide-1-attempt-1.*`처럼 slide별로 보존하며, 실패한 slide만 최대 3회 재생성합니다.
+Single은 기존처럼 세로 4:5 이미지 한 장을 생성합니다. Carousel은 slide 1에 현재 계정 reference(필요 시 owner reference)를 사용하고, slide 2~4에는 같은 canonical reference와 통과한 slide 1 anchor를 함께 참고해 identity와 visual language를 유지합니다. 생성물은 `<run_dir>/slide-1-attempt-1.*`처럼 slide별로 보존하며, 실패한 slide만 최대 3회 재생성합니다.
 
 각 시도마다 `automation/review.example.json` 형식의 `<run_dir>/review-N.json`을 기록합니다. 다음 중 하나면 문제를 생성 지침에 반영해 다시 생성합니다.
 
@@ -97,7 +97,7 @@ concept_score < 80
 fatal_issue == true
 ```
 
-Carousel은 `automation/carousel-review.example.json` 형식으로 각 slide를 따로 검수합니다. 기존 기준을 그대로 유지하면서 `carousel_consistency_score >= 80`을 추가하고, 보호자가 실제 등장하는 slide는 `owner_identity_score >= 75`도 요구합니다. 검수 대상은 Kongi identity, 필요한 owner identity, visual style, storyboard continuity입니다.
+Carousel은 `automation/carousel-review.example.json` 형식으로 각 slide를 따로 검수합니다. 기존 기준을 그대로 유지하면서 `carousel_consistency_score >= 80`을 추가하고, 보호자가 실제 등장하는 slide는 `owner_identity_score >= 75`도 요구합니다. 검수 대상은 현재 계정 pet identity, 필요한 owner identity, visual style, storyboard continuity입니다.
 
 최대 3회입니다. 모두 실패하면 다음 명령으로 실패를 기록하고 사이트·Git·Instagram을 건드리지 않습니다.
 
@@ -124,7 +124,7 @@ node automation/run.mjs complete <accountKey> --draft <run_dir>/draft.json --ima
 Carousel은 storyboard 순서대로 `--image`, `--review`를 반복합니다.
 
 ```powershell
-node automation/run.mjs complete kongi `
+node automation/run.mjs complete <accountKey> `
   --draft <run_dir>/draft.json `
   --image <run_dir>/slide-1-final.jpg --review <run_dir>/review-slide-1.json `
   --image <run_dir>/slide-2-final.jpg --review <run_dir>/review-slide-2.json `
@@ -154,6 +154,8 @@ CTA는 Instagram 전용 자산이므로 `prompts.js`의 `cover`나 `images[]`에
 
 ```powershell
 npm run kongi:test
+npm run hamnimi:test
+npm run hamnimi:features:test
 ```
 
 검증 항목은 `prompts.js` 파싱, 전체/동물별 개수, 다음 ID, 중복 ID, 이미지 경로, 공유 프롬프트 금칙어와 필수 지침, 이미지 검수 임계값, Git 변경 범위입니다.
@@ -190,7 +192,7 @@ powershell -ExecutionPolicy Bypass -File automation/register-insights-task.ps1
 ## 런타임 파일
 
 - `automation/reference/kongi.png`: 수정하지 않는 콩이 canonical reference
-- `automation/reference/kongi-owner.png`: owner-required Kongi 컨셉에서만 사용하는 생성형 보호자 canonical reference
+- `automation/reference/kongi-owner.png`: 두 계정이 공유하되 각 계정의 owner-required 컨셉에서만 사용하는 생성형 보호자 canonical reference
 - `automation/runs/<accountKey>/<run_id>/`: 초안, 생성 시도, 검수, 가상 게시 데이터
 - `automation/backups/<accountKey>/<timestamp>/`: 실제 수정 전 백업
 - `automation/logs/<accountKey>/YYYY-MM-DD.jsonl`: 계정별 단계 로그

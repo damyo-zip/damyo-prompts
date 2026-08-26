@@ -2,7 +2,7 @@ import { noveltyAgainstHistory } from "./trend-radar/dedupe.mjs";
 import { prepareResultForAccount, runTrendRadar } from "./trend-radar/index.mjs";
 import { experienceConfigFromEnv, resolveConceptExperience } from "./content-experience.mjs";
 
-const SUPPORTED_SELECTION_ACCOUNTS = new Set(["kongi"]);
+const SUPPORTED_SELECTION_ACCOUNTS = new Set(["kongi", "hamnimi"]);
 
 function booleanValue(value, fallback = false) {
   if (value == null || value === "") return fallback;
@@ -14,7 +14,7 @@ function finiteNumber(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function selectionConfigFromEnv(env = process.env) {
+function selectionConfigFromEnv(env = process.env, accountName = "kongi") {
   const accounts = String(env.TREND_RADAR_SELECTION_ACCOUNTS || "kongi")
     .split(",")
     .map(value => value.trim().toLowerCase())
@@ -25,7 +25,7 @@ function selectionConfigFromEnv(env = process.env) {
     minEvidence: finiteNumber(env.TREND_RADAR_MIN_EVIDENCE, 50),
     allowDeclining: booleanValue(env.TREND_RADAR_ALLOW_DECLINING, false),
     duplicateThreshold: finiteNumber(env.TREND_RADAR_DUPLICATE_THRESHOLD, 0.72),
-    ...experienceConfigFromEnv(env)
+    ...experienceConfigFromEnv(env, accountName)
   };
 }
 
@@ -115,12 +115,13 @@ function fallbackReasonForAssessments(concepts, assessments) {
 async function selectIdeaSource({
   accountName,
   recentPosts = [],
-  config = selectionConfigFromEnv(),
+  config = null,
   trendProvider = defaultTrendProvider,
   radarOptions = {},
   ownerAssetAvailable = false
 } = {}) {
   const account = String(accountName || "").toLowerCase();
+  config ||= selectionConfigFromEnv(process.env, account);
   const fallbackDetails = { owner_asset_available: ownerAssetAvailable };
   if (!config.enabled) return fallbackSelection(account, config, "feature_flag_disabled", fallbackDetails);
   if (!SUPPORTED_SELECTION_ACCOUNTS.has(account)) return fallbackSelection(account, config, "account_not_supported", fallbackDetails);
@@ -191,18 +192,23 @@ async function selectIdeaSource({
 function ideaGuidanceForSelection(selection, fallbackGuidance = []) {
   if (selection.idea_source !== "trend_radar" || !selection.selected_idea) return fallbackGuidance;
   const concept = selection.selected_idea;
+  const isHamnimi = selection.account === "hamnimi";
+  const displayName = isHamnimi ? "햄님이" : "콩이";
+  const adaptation = isHamnimi
+    ? concept.hamster_adaptation || concept.pet_adaptation || concept.description
+    : concept.dog_adaptation || concept.pet_adaptation || concept.description;
   return [
     `이번 게시의 아이디어 출처는 Trend Radar이며 '${concept.title}' 컨셉을 사용한다.`,
     `검증된 원본 트렌드: ${concept.original_trend}`,
-    `콩이 적용 방향: ${concept.dog_adaptation || concept.pet_adaptation || concept.description}`,
+    `${displayName} 적용 방향: ${adaptation}`,
     `Evidence ${concept.evidence_strength}, Total ${concept.total_score}, Momentum ${concept.trend_momentum}.`,
     `OWNER MODE: ${selection.owner_mode}; OWNER ASSET AVAILABLE: ${selection.owner_asset_available ? "YES" : "NO"}; OWNER ASSET USED: ${selection.owner_asset_used ? "YES" : "NO"}.`,
     `POST FORMAT: ${selection.post_format}; CONTENT SLIDES: ${selection.preferred_slide_count}; CTA: YES.`,
     selection.owner_mode === "required"
-      ? "보호자 reference와 콩이 reference를 함께 사용하고 두 정체성을 유지한다."
+      ? `보호자 reference와 ${displayName} reference를 함께 사용하고 두 정체성을 유지한다.`
       : "보호자 reference를 사용하지 않고 결과에 보호자를 등장시키지 않는다.",
     selection.post_format === "carousel"
-      ? "하나의 컨셉을 공유하는 연속 storyboard를 만들고 각 slide의 Kongi 정체성과 visual language를 일관되게 유지한다."
+      ? `하나의 컨셉을 공유하는 연속 storyboard를 만들고 각 slide의 ${displayName} 정체성과 visual language를 일관되게 유지한다.`
       : "기존 single-content 이미지 생성·검수 경로를 그대로 사용한다.",
     "이 컨셉의 장면과 시각적 핵심을 유지하면서 기존 prompt·validation·caption 규칙에 맞게 draft를 작성한다."
   ];

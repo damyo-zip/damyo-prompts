@@ -480,6 +480,9 @@ async function commandPreflight() {
     performance_report: payload.performance_report,
     idea_source: payload.idea_source,
     trend_concept_id: ideaSelection.trend_concept_id,
+    trend_total_score: ideaSelection.trend_total_score,
+    trend_evidence_strength: ideaSelection.trend_evidence_strength,
+    trend_momentum: ideaSelection.trend_momentum,
     owner_mode: payload.owner_mode,
     owner_asset_available: payload.owner_asset_available,
     owner_asset_used: payload.owner_asset_used,
@@ -621,6 +624,9 @@ function publicationMetadata(draft, imageSources = []) {
   };
   if (draft.idea_source) metadata.idea_source = draft.idea_source;
   if (draft.trend_concept_id) metadata.trend_concept_id = draft.trend_concept_id;
+  if (draft.trend_total_score != null) metadata.trend_total_score = Number(draft.trend_total_score);
+  if (draft.trend_evidence_strength != null) metadata.trend_evidence_strength = Number(draft.trend_evidence_strength);
+  if (draft.trend_momentum) metadata.trend_momentum = draft.trend_momentum;
   return metadata;
 }
 
@@ -664,7 +670,14 @@ function publicAssetUrl(relativePath, baseUrl = inferPublicBaseUrl()) {
   return new URL(relativePath.replace(/\\/g, "/"), baseUrl).href;
 }
 
-function buildInstagramCarouselPlan({ contentImageUrls, ctaImageUrl, caption, altText }) {
+function buildInstagramCarouselPlan({
+  contentImageUrls,
+  ctaImageUrl,
+  caption,
+  altText,
+  accountKey = accountConfig.accountKey,
+  displayName = accountConfig.displayName
+}) {
   if (!Array.isArray(contentImageUrls) || contentImageUrls.length < 1) {
     throw new Error("Instagram Carousel에는 콘텐츠 이미지가 한 장 이상 필요합니다.");
   }
@@ -683,14 +696,14 @@ function buildInstagramCarouselPlan({ contentImageUrls, ctaImageUrl, caption, al
     })),
     {
       role: "cta",
-      label: `cta_${accountConfig.accountKey}`,
-      account_key: accountConfig.accountKey,
+      label: `cta_${accountKey}`,
+      account_key: accountKey,
       image_url: ctaImageUrl,
-      alt_text: `${accountConfig.displayName} Instagram 프로필 방문 안내 이미지`
+      alt_text: `${displayName} Instagram 프로필 방문 안내 이미지`
     }
   ];
   return {
-    account_key: accountConfig.accountKey,
+    account_key: accountKey,
     child_order: slides.map(slide => slide.label),
     final_slide: slides.at(-1).label,
     child_container_requests: slides.map(slide => ({
@@ -1272,7 +1285,7 @@ async function commandTest() {
   if (!/^P-\d{3,}$/.test(summary.next_id)) failures.push("다음 ID 형식 오류");
   if (!(await exists(referencePath))) failures.push(`${accountConfig.displayName} 기준 이미지 없음`);
   const ownerReference = await ownerReferenceStatus();
-  if (accountConfig.accountKey === "kongi" && !ownerReference.available) failures.push(`콩이 보호자 reference 없음 또는 손상: ${ownerReference.error || "unavailable"}`);
+  if (accountConfig.ownerReferenceFile && !ownerReference.available) failures.push(`${accountConfig.displayName} 보호자 reference 없음 또는 손상: ${ownerReference.error || "unavailable"}`);
   try { parsePromptsSource(source); } catch (error) { failures.push(`JavaScript 파싱 실패: ${error.message}`); }
   for (const item of PROMPTS) {
     if (!item.id || !item.title || !item.category) failures.push(`${item.id || "unknown"}: 필수 데이터 누락`);

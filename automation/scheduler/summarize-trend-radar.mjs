@@ -10,7 +10,7 @@ try {
     readFile(conceptsPath, "utf8").then(JSON.parse),
     readFile(shadowPath, "utf8").then(JSON.parse)
   ]);
-  const shadow = [...(history.runs || [])].reverse().find(item => item.account === "kongi") || null;
+  const latestFor = account => [...(history.runs || [])].reverse().find(item => item.account === account) || null;
   process.stdout.write(JSON.stringify({
     radar: {
       candidates: radar.candidate_count,
@@ -19,7 +19,10 @@ try {
       watchlist: radar.watchlist_count,
       errors: Array.isArray(radar.errors) ? radar.errors : []
     },
-    shadow
+    shadows: {
+      kongi: latestFor("kongi"),
+      hamnimi: latestFor("hamnimi")
+    }
   }));
 } catch (error) {
   console.error(error.message);
