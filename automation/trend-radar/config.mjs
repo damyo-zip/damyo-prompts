@@ -12,6 +12,18 @@ const config = {
   recentPostDays: 60,
   minimumConcepts: 10,
   maximumConcepts: 30,
+  publishable: {
+    minEvidence: Number(process.env.PUBLISHABLE_MIN_EVIDENCE || 50)
+  },
+  watchlist: {
+    minEvidence: 20,
+    minTotalScore: 40
+  },
+  shadow: {
+    retentionDays: 90,
+    maxRuns: 500,
+    topConceptLimit: 10
+  },
   requestTimeoutMs: Number(process.env.TREND_RADAR_REQUEST_TIMEOUT_MS || 8_000),
   dataDir: join(automationDir, "data"),
   logDir: join(automationDir, "logs", "trend-radar"),

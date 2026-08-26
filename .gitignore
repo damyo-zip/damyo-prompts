@@ -13,4 +13,5 @@ automation/insights-summary.json
 automation/data/trend_candidates.json
 automation/data/trend_concepts.json
 automation/data/trend_history.json
+automation/data/trend_shadow_history.json
 automation/data/account_performance.json

@@ -28,6 +28,7 @@ function dataPaths(config) {
     candidates: join(config.dataDir, "trend_candidates.json"),
     concepts: join(config.dataDir, "trend_concepts.json"),
     history: join(config.dataDir, "trend_history.json"),
+    shadow: join(config.dataDir, "trend_shadow_history.json"),
     performance: join(config.dataDir, "account_performance.json")
   };
 }

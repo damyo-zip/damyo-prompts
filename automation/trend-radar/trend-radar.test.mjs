@@ -16,8 +16,10 @@ import {
   validateOriginalTrendGrounding,
   validateTrendEvidence
 } from "./evidence.mjs";
-import { getBestTrendForAccount, resolveIdeaWithTrendRadar, runTrendRadar } from "./runner.mjs";
+import { assessPublishability, WatchlistReason } from "./publishability.mjs";
+import { executeShadowMode, formatMomentum, getBestTrendForAccount, resolveIdeaWithTrendRadar, runTrendRadar } from "./runner.mjs";
 import { applyEvidenceCap, calculateTotalScore, scoreConcept } from "./scorer.mjs";
+import { appendShadowHistory, buildShadowRun, calculateShadowChange, loadShadowHistory, pruneShadowRuns } from "./shadow.mjs";
 import { cacheIsFresh } from "./storage.mjs";
 
 const fixedNow = new Date("2026-08-26T00:00:00.000Z");
@@ -59,6 +61,29 @@ async function temporaryConfig(overrides = {}) {
     logDir: join(root, "logs"),
     postsDir: join(root, "posts"),
     requestTimeoutMs: 100,
+    ...overrides
+  };
+}
+
+function operationalConcept(overrides = {}) {
+  return {
+    concept_id: "trend-operational",
+    title: "Operational Pet Trend",
+    total_score: 82,
+    evidence_strength: 70,
+    weak_signal: false,
+    trend_momentum: "stable",
+    recent_source_count_7d: 3,
+    trend_score: 80,
+    pet_adaptability: 85,
+    visual_impact: 85,
+    replicability: 80,
+    account_fit: 75,
+    novelty: 80,
+    performance_potential: 50,
+    dog_fit_score: 75,
+    cat_fit_score: 70,
+    hamster_fit_score: 65,
     ...overrides
   };
 }
@@ -298,4 +323,131 @@ test("trend momentum compares the latest prior evidence snapshot", () => {
   assert.equal(calculateTrendMomentum({ ...concept, concept_id: "new" }, history, fixedNow), "new");
   assert.equal(calculateTrendMomentum({ ...concept, independent_source_count: 1 }, { snapshots: [{ captured_at: "2026-08-25T00:00:00Z", concepts: [{ concept_id: "trend-1", independent_source_count: 6 }] }] }, fixedNow), "declining");
   assert.equal(calculateTrendMomentum({ ...concept, independent_source_count: 3 }, { snapshots: [{ captured_at: "2026-08-25T00:00:00Z", concepts: [{ concept_id: "trend-1", independent_source_count: 3 }] }] }, fixedNow), "stable");
+});
+
+test("publishable evidence threshold is configurable", () => {
+  const concept = operationalConcept({ evidence_strength: 55 });
+  assert.equal(assessPublishability(concept, { ...defaults, publishable: { minEvidence: 50 } }).publishable, true);
+  assert.equal(assessPublishability(concept, { ...defaults, publishable: { minEvidence: 60 } }).publishable, false);
+});
+
+test("publishable calculation stores decision fields", () => {
+  const accepted = assessPublishability(operationalConcept(), defaults);
+  const rejected = assessPublishability(operationalConcept({ evidence_strength: 49 }), defaults);
+  assert.deepEqual(accepted.publishable_rejection_reasons, []);
+  assert.equal(accepted.publishable_reason, "");
+  assert.equal(rejected.publishable_reason, "Evidence below publishable threshold");
+  assert.deepEqual(rejected.publishable_rejection_reasons, ["evidence_strength 49 < 50"]);
+});
+
+test("weak signal is never publishable", () => {
+  const result = assessPublishability(operationalConcept({ weak_signal: true, evidence_strength: 90 }), defaults);
+  assert.equal(result.publishable, false);
+  assert.ok(result.publishable_rejection_reasons.includes("weak_signal is true"));
+});
+
+test("evidence below threshold is not publishable", () => {
+  const result = assessPublishability(operationalConcept({ evidence_strength: 49 }), defaults);
+  assert.equal(result.publishable, false);
+  assert.ok(result.publishable_rejection_reasons.includes("evidence_strength 49 < 50"));
+});
+
+test("getBestTrendForAccount returns only publishable candidates", async () => {
+  const config = await temporaryConfig();
+  const result = await getBestTrendForAccount("kongi", {
+    config,
+    now: fixedNow,
+    forceRefresh: true,
+    inputCandidates: [
+      evidenceCandidate("Paparazzi trend photo shoot", "A", "https://a.example/1", "2026-08-25T00:00:00Z", "instagram"),
+      evidenceCandidate("Behind-the-scenes shoot paparazzi framing", "B", "https://b.example/1", "2026-08-24T00:00:00Z", "fashion_editorial")
+    ]
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.concept.publishable, true);
+  assert.ok(result.concept.evidence_strength >= config.publishable.minEvidence);
+});
+
+test("no publishable candidate returns the legacy fallback boundary", async () => {
+  const config = await temporaryConfig();
+  const result = await getBestTrendForAccount("kongi", {
+    config,
+    now: fixedNow,
+    forceRefresh: true,
+    inputCandidates: [evidenceCandidate("Paparazzi trend photo shoot", "A", "https://a.example/1", "2026-08-25T00:00:00Z", "instagram")]
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.fallback, true);
+  assert.equal(result.reason, "no_publishable_concept");
+});
+
+test("watchlist classifies useful non-publishable signals", () => {
+  const result = assessPublishability(operationalConcept({
+    evidence_strength: 49,
+    trend_momentum: "declining",
+    recent_source_count_7d: 1
+  }), defaults);
+  assert.equal(result.watchlist, true);
+  assert.deepEqual(result.watchlist_reasons, [
+    WatchlistReason.LOW_EVIDENCE,
+    WatchlistReason.DECLINING,
+    WatchlistReason.INSUFFICIENT_RECENT_SIGNAL
+  ]);
+});
+
+test("shadow history appends runs", async () => {
+  const config = await temporaryConfig();
+  const concept = { ...operationalConcept(), ...assessPublishability(operationalConcept(), config) };
+  const run = buildShadowRun({ concepts: [concept] }, "kongi", { runs: [] }, fixedNow, config);
+  await appendShadowHistory(config, run, fixedNow);
+  const history = await loadShadowHistory(config);
+  assert.equal(history.runs.length, 1);
+  assert.equal(history.runs[0].selected_concept_id, concept.concept_id);
+});
+
+test("shadow history keeps accounts separated", async () => {
+  const config = await temporaryConfig();
+  await appendShadowHistory(config, { run_at: "2026-08-25T00:00:00Z", account: "kongi", top_publishable: [], watchlist: [] }, fixedNow);
+  await appendShadowHistory(config, { run_at: fixedNow.toISOString(), account: "hamnimi", top_publishable: [], watchlist: [] }, fixedNow);
+  const history = await loadShadowHistory(config);
+  assert.deepEqual(history.runs.map(run => run.account), ["kongi", "hamnimi"]);
+});
+
+test("shadow mode never enters the Instagram posting flow and tolerates history failure", async () => {
+  const config = await temporaryConfig();
+  const concept = operationalConcept();
+  const shadow = await executeShadowMode({
+    accountName: "kongi",
+    config,
+    now: fixedNow,
+    radarRunner: async () => ({ generated_at: fixedNow.toISOString(), concepts: [concept] }),
+    historyLoader: async () => ({ runs: [] }),
+    historyWriter: async () => { throw new Error("disk unavailable"); }
+  });
+  assert.equal(shadow.mode, "shadow");
+  assert.equal(shadow.instagram_posting_attempted, false);
+  assert.equal(shadow.record.selected_concept_id, concept.concept_id);
+  assert.equal(shadow.history_write_error, "disk unavailable");
+});
+
+test("shadow history retention enforces age and run limits", () => {
+  const config = { ...defaults, shadow: { ...defaults.shadow, retentionDays: 2, maxRuns: 2 } };
+  const runs = [
+    { run_at: "2026-08-20T00:00:00Z" },
+    { run_at: "2026-08-24T00:00:00Z" },
+    { run_at: "2026-08-25T00:00:00Z" },
+    { run_at: "2026-08-26T00:00:00Z" }
+  ];
+  assert.deepEqual(pruneShadowRuns(runs, config, fixedNow).map(run => run.run_at), ["2026-08-25T00:00:00Z", "2026-08-26T00:00:00Z"]);
+});
+
+test("rising display and previous snapshot comparison show deltas", () => {
+  const change = calculateShadowChange(
+    { run_at: "2026-08-25T00:00:00Z", total_score: 90.1, evidence_strength: 75, trend_momentum: "unknown" },
+    { total_score: 92.4, evidence_strength: 81, trend_momentum: "rising" }
+  );
+  assert.equal(formatMomentum("rising"), "↑ RISING");
+  assert.deepEqual(change.total_score, { from: 90.1, to: 92.4, delta: 2.3 });
+  assert.deepEqual(change.evidence_strength, { from: 75, to: 81, delta: 6 });
+  assert.equal(change.momentum.to, "rising");
 });
