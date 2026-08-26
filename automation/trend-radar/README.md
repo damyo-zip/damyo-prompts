@@ -92,6 +92,34 @@ if (result.ok) {
 
 실제 사용 확정 시에만 `{ recordSelection: true }`를 전달해 선택 이력을 기록합니다. 단순 preflight 추천은 사용한 것으로 기록하지 않습니다.
 
+## Windows 자동 실행
+
+Windows Task Scheduler 작업 `Damyo Trend Radar`가 로컬 시간 기준 매일 `08:30`, `20:30`에 Trend Radar refresh와 Kongi shadow 기록을 차례로 실행합니다. 작업은 Instagram 게시, 이미지·caption 생성, GitHub asset push 또는 Meta API를 호출하지 않습니다.
+
+- wrapper: `automation/scheduler/run-trend-radar.ps1`
+- 등록 스크립트: `automation/scheduler/register-trend-radar-task.ps1`
+- 로그: `automation/logs/trend-scheduler.log` (5MB, 백업 3개)
+- runtime 출력: `automation/data/trend_candidates.json`, `trend_concepts.json`, `trend_history.json`, `trend_shadow_history.json`
+
+수동 실행과 작업 등록:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File automation/scheduler/run-trend-radar.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File automation/scheduler/register-trend-radar-task.ps1
+```
+
+상태 확인, 즉시 실행, 비활성화와 삭제:
+
+```powershell
+Get-ScheduledTask -TaskName "Damyo Trend Radar"
+Get-ScheduledTaskInfo -TaskName "Damyo Trend Radar"
+Start-ScheduledTask -TaskName "Damyo Trend Radar"
+Disable-ScheduledTask -TaskName "Damyo Trend Radar"
+Unregister-ScheduledTask -TaskName "Damyo Trend Radar" -Confirm:$false
+```
+
+작업은 놓친 예약을 가능한 한 빨리 실행(`StartWhenAvailable`), 이미 실행 중이면 새 instance 무시(`IgnoreNew`), PC 깨우기 비활성으로 등록됩니다. wrapper도 파일 잠금을 사용하며 refresh가 실패해도 shadow가 유효 캐시로 실행될 수 있도록 계속 진행합니다. shadow까지 실패하면 게시 파이프라인에 진입하지 않고 오류 로그와 nonzero exit code만 남깁니다.
+
 ## Kongi 1단계 실제 선택 연결
 
 `automation/idea-selector.mjs`가 preflight의 아이디어 출처를 결정합니다. 기본값은 OFF이며 다음 설정을 사용합니다.
