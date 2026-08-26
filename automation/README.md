@@ -25,10 +25,11 @@
 ```powershell
 npm run trend:dry-run
 npm run trend:refresh
+npm run trend:evidence
 npm run trend:test
 ```
 
-`preflight` 결과의 `trend_radar.concept`가 현재 계정의 추천 아이디어입니다. 추천이 없거나 collector·분석·캐시가 모두 실패하면 `trend_radar.fallback`이 `true`가 되고, 기존 게시 이력·Insights·`idea_guidance`를 사용하는 기획 흐름은 중단되지 않습니다. 캐시 TTL, 데이터 소스, 점수, 중복 방지와 공개 인터페이스는 `automation/trend-radar/README.md`를 참고합니다.
+`preflight` 결과의 `trend_radar.concept`가 현재 계정의 추천 아이디어입니다. v0.2는 실제 source에서 추적되는 `original_trend`와 창의적인 `pet_adaptation`을 분리하고, 독립 출처·7일/30일 최신성·cross-platform·source quality를 검증합니다. weak signal이거나 추천이 없고 collector·분석·캐시도 실패하면 `trend_radar.fallback`이 `true`가 되며, 기존 게시 이력·Insights·`idea_guidance` 흐름은 중단되지 않습니다. 상세 구조는 `automation/trend-radar/README.md`를 참고합니다.
 
 ## 최초 설정
 

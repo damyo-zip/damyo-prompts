@@ -6,7 +6,11 @@ function clusterCandidates(candidates, analyzer = analyzeCandidate) {
     const analyzed = analyzer(candidate);
     if (!analyzed) continue;
     const existing = clusters.get(analyzed.concept_key);
-    if (existing) existing.candidates.push(candidate);
+    if (existing) {
+      existing.candidates.push(candidate);
+      existing.grounding_patterns = [...new Set([...(existing.grounding_patterns || []), ...(analyzed.grounding_patterns || [])])];
+      existing.grounded_candidate_urls = [...new Set([...(existing.grounded_candidate_urls || []), ...(analyzed.grounded_candidate_urls || [])])];
+    }
     else clusters.set(analyzed.concept_key, analyzed);
   }
   return [...clusters.values()].map(cluster => {

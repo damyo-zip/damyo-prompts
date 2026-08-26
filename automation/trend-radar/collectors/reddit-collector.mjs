@@ -13,7 +13,11 @@ async function collectReddit({ config, fetchImpl = fetch, now = new Date(), comm
       const rssUrl = `https://www.reddit.com/r/${encodeURIComponent(community)}/top/.rss?t=week`;
       const rssResponse = await fetchImpl(rssUrl, { ...requestOptions, signal: AbortSignal.timeout(config.requestTimeoutMs) });
       if (!rssResponse.ok) throw new Error(`Reddit r/${community} HTTP ${response.status}/${rssResponse.status}`);
-      return parseRss(await rssResponse.text(), { source: `Reddit r/${community}`, now });
+      return parseRss(await rssResponse.text(), {
+        source: `Reddit r/${community}`,
+        now,
+        candidateDefaults: { source_type: "community_discussion", platform: "reddit", collector: "reddit_rss" }
+      });
     }
     const json = await response.json();
     return (json?.data?.children || []).map(({ data }) => normalizeCandidate({
@@ -22,6 +26,9 @@ async function collectReddit({ config, fetchImpl = fetch, now = new Date(), comm
       title: data.title,
       description: data.selftext || `Reddit score ${data.score || 0}; ${data.num_comments || 0} comments`,
       published_at: new Date(Number(data.created_utc) * 1000),
+      source_type: "community_discussion",
+      platform: "reddit",
+      collector: "reddit_json",
       keywords: [...(data.link_flair_text ? [data.link_flair_text] : []), ...(data.title?.toLowerCase().match(/[a-z0-9가-힣-]{3,}/g) || [])]
     }, now));
   }));

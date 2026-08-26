@@ -7,6 +7,7 @@
 ```powershell
 npm run trend:dry-run
 npm run trend:refresh
+npm run trend:evidence
 node automation/trend-radar/runner.mjs --dry-run --account hamnimi
 npm run trend:test
 ```
@@ -20,15 +21,40 @@ npm run trend:test
 
 이 파일들은 실행 때 계속 바뀌므로 Git에서 제외됩니다.
 
-## 흐름
+`trend:evidence` 또는 `--show-evidence`는 전체 source provenance와 URL, source quality, 독립 근거 판정을 출력합니다. v0.2 캐시는 `schema_version: 2`이며 v0.1 캐시는 자동으로 새로 수집합니다.
 
-1. Google News RSS의 폭넓은 검색어, 공개 트렌드 기사, Reddit 공개 JSON을 collector별로 병렬 수집합니다.
+## v0.2 흐름
+
+1. **Raw sources:** Google News RSS의 폭넓은 검색어, 공개 트렌드 기사, Reddit 공개 JSON/RSS를 collector별로 병렬 수집합니다.
 2. collector 실패는 격리합니다. 최근 7일 후보가 부족하면 30일 범위를 사용합니다.
-3. `analyzer.mjs`가 링크를 재사용 가능한 이미지 컨셉으로 정규화합니다. 외부 AI API 없이 결정론적으로 실행되며 분석기 함수는 교체 주입할 수 있습니다.
-4. 같은 컨셉 키를 묶고 여러 출처와 최초/최종 감지 시각을 보존합니다.
-5. 최근 계정 게시물 최대 30개와 60일 이내 선택 이력을 의미 토큰으로 비교합니다. 유사도 0.72 이상은 제외합니다.
-6. 계정별 적합도를 적용하고 가중 점수를 계산하여 정렬합니다.
-7. `getBestTrendForAccount(accountName)`가 자동 게시 기획 단계에 최상위 컨셉 하나를 안전하게 제공합니다.
+3. **Raw trend signal:** collector가 원 게시자, source type, 플랫폼, URL, 제목과 검증 가능한 게시일을 보존합니다. 날짜 없는 페이지는 수집일을 게시일로 가장하지 않습니다.
+4. **Trend cluster:** `analyzer.mjs`가 source에서 실제로 일치한 패턴만 `original_trend`로 정규화합니다. 창의적인 반려동물 결과인 `pet_adaptation`과 별도로 저장합니다.
+5. **Evidence validation:** 같은 원 게시자, 같은 도메인 또는 의미상 동일한 제목을 하나의 independent source group으로 묶고 7일·30일 신호, 플랫폼 수와 source quality를 계산합니다.
+6. **Pet adaptation:** 원본 트렌드가 실제 source URL과 pattern으로 검증된 컨셉만 dog/cat/hamster 버전으로 변환합니다.
+7. **Account fit/scoring:** 최근 게시물 최대 30개와 60일 이내 선택 이력을 비교하고, 근거가 약한 trend score를 상한 처리합니다.
+8. **Final concept:** weak signal은 저장하되 기본 점수에서 18점을 감점하며 자동 게시 추천에서는 제외합니다.
+
+각 최종 컨셉은 `original_trend`, `pet_adaptation`, `source_evidence`, `independent_source_count`, `recent_source_count_7d`, `recent_source_count_30d`, `cross_platform_count`, `latest_source_date`, `evidence_strength`, `weak_signal`, `trend_momentum`을 포함합니다.
+
+## 독립 출처와 source quality
+
+- Google News URL은 aggregator 도메인 대신 RSS에 포함된 원 게시자 이름으로 구분합니다.
+- 같은 게시자·도메인의 여러 항목은 독립 출처 하나로 계산합니다.
+- 서로 다른 게시자라도 제목 의미 유사도가 config threshold 이상이면 재배포/aggregation 그룹 하나로 계산합니다.
+- 공식 trend report, 전문 매체, tracker, meme database, community, 일반 기사, SEO성 source의 품질값은 `config.mjs`의 `sourceQuality`와 `sourceQualityDomains`에서 조정합니다.
+- collector query가 붙인 플랫폼 metadata보다 제목·source·URL에서 명시적으로 확인되는 TikTok, Instagram, Pinterest, Reddit, meme/fashion 신호를 우선합니다.
+
+## Evidence strength와 weak signal
+
+`evidence_strength`는 독립 출처 25%, 최근 7일 25%, 최근 30일 10%, cross-platform 20%, source quality 10%, 최신 신호 10%로 계산합니다. target count와 가중치는 config에서 수정합니다.
+
+다음 중 하나도 만족하지 않으면 기본적으로 weak signal입니다.
+
+- independent source 2개 이상
+- 최근 7일의 날짜 확인 가능한 독립 source 2개 이상
+- cross-platform/source-type channel 2개 이상
+
+Evidence가 30 미만이면 trend score 최대 50, 50 미만이면 최대 70, 70 미만이면 최대 85입니다.
 
 ## 점수
 
@@ -36,10 +62,11 @@ npm run trend:test
 
 | 점수 | 기본 가중치 | 계산 |
 |---|---:|---|
-| `trend_score` | 20% | 최근성, 독립 출처 수, 플랫폼 신호, 반복 관측 |
-| `pet_adaptability` | 25% | 반려동물 버전의 자연스러움과 따라 만들기 욕구 |
+| `trend_score` | 15% | 최신성·반복 신호에 evidence 상한 적용 |
+| `evidence_strength` | 15% | 독립 출처·7d/30d·플랫폼·품질·freshness |
+| `pet_adaptability` | 20% | 반려동물 버전의 자연스러움과 따라 만들기 욕구 |
 | `visual_impact` | 20% | 썸네일 이해도와 시각적 대비 |
-| `replicability` | 15% | 사진 한 장으로 재현할 가능성 |
+| `replicability` | 10% | 사진 한 장으로 재현할 가능성 |
 | `account_fit` | 10% | dog/cat/hamster 계정별 적합도 |
 | `novelty` | 10% | 최근 게시·선택 컨셉과의 의미 거리 |
 | `performance_potential` | 0% | Insights 표본 부족 시 50, 추후 가중치 활성화 가능 |
@@ -50,6 +77,7 @@ npm run trend:test
 - 갱신 중 인터넷, 검색, Reddit, 페이지 파싱 또는 분석이 실패하면 오래된 유효 캐시를 먼저 사용합니다.
 - 캐시도 없으면 `getBestTrendForAccount`는 예외 대신 `{ ok: false, fallback: true }`를 반환합니다.
 - 기존 `preflight`는 이 결과를 `trend_radar` 필드에 넣습니다. 실패 시 기존 `idea_guidance`, 게시 이력, Insights 기반 기획이 그대로 유지됩니다.
+- `trend_history.json`의 evidence snapshot과 직전 independent source count를 비교해 `new`, `rising`, `stable`, `declining`, `unknown` momentum을 계산합니다. 최초 snapshot은 `unknown`입니다.
 
 ## 공개 인터페이스
 

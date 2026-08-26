@@ -30,10 +30,19 @@ function articleText(html) {
 }
 
 async function collectSearchResults({ config, fetchImpl = fetch, now = new Date(), queries = searchQueries } = {}) {
-  const settled = await Promise.allSettled(queries.map(async query => {
-    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(`${query} when:${config.recentWindowDays}d`)}&hl=en-US&gl=US&ceid=US:en`;
+  const settled = await Promise.allSettled(queries.map(async queryConfig => {
+    const item = typeof queryConfig === "string" ? { query: queryConfig } : queryConfig;
+    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(`${item.query} when:${config.recentWindowDays}d`)}&hl=en-US&gl=US&ceid=US:en`;
     const xml = await fetchText(url, { timeoutMs: config.requestTimeoutMs, fetchImpl });
-    return parseRss(xml, { source: "Google News", now });
+    return parseRss(xml, {
+      source: "Google News",
+      now,
+      candidateDefaults: {
+        source_type: item.sourceType || "news_article",
+        platform: item.platform || "web",
+        collector: "google_news_rss"
+      }
+    });
   }));
   const candidates = settled.flatMap(result => result.status === "fulfilled" ? result.value : []);
   const errors = settled.filter(result => result.status === "rejected").map(result => result.reason.message);
@@ -41,12 +50,23 @@ async function collectSearchResults({ config, fetchImpl = fetch, now = new Date(
 }
 
 async function collectEditorialPages({ config, fetchImpl = fetch, now = new Date(), pages = editorialPages } = {}) {
-  const settled = await Promise.allSettled(pages.map(async url => {
+  const settled = await Promise.allSettled(pages.map(async pageConfig => {
+    const item = typeof pageConfig === "string" ? { url: pageConfig } : pageConfig;
+    const url = item.url;
     const html = await fetchText(url, { timeoutMs: config.requestTimeoutMs, fetchImpl });
     const title = metaContent(html, "og:title") || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || url;
     const description = [metaContent(html, "og:description") || metaContent(html, "description"), articleText(html)].filter(Boolean).join(" ");
-    const publishedAt = metaContent(html, "article:published_time") || metaContent(html, "datePublished") || now.toISOString();
-    return normalizeCandidate({ source: new URL(url).hostname, source_url: url, title, description, published_at: publishedAt }, now);
+    const publishedAt = metaContent(html, "article:published_time") || metaContent(html, "datePublished") || null;
+    return normalizeCandidate({
+      source: new URL(url).hostname,
+      source_url: url,
+      title,
+      description,
+      published_at: publishedAt,
+      source_type: item.sourceType || "unknown",
+      platform: item.platform || "web",
+      collector: "editorial_page"
+    }, now);
   }));
   return {
     candidates: settled.filter(result => result.status === "fulfilled").map(result => result.value),

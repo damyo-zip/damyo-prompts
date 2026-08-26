@@ -8,15 +8,20 @@ function daysOld(value, now = new Date()) {
   return Math.max(0, (now.getTime() - date.getTime()) / 86_400_000);
 }
 
-function calculateTrendScore(concept, now = new Date()) {
+function applyEvidenceCap(rawTrendScore, evidenceStrength, trendScoreCaps = []) {
+  const cap = trendScoreCaps.find(item => Number(evidenceStrength) < Number(item.below));
+  return clamp(cap ? Math.min(rawTrendScore, cap.max) : rawTrendScore);
+}
+
+function calculateTrendScore(concept, now = new Date(), evidenceConfig = {}) {
   const age = daysOld(concept.last_seen_at, now);
-  const recency = age <= 2 ? 50 : age <= 7 ? 44 : age <= 14 ? 34 : age <= 30 ? 22 : 8;
-  const sourceDiversity = Math.min(25, Math.max(0, (concept.source_count - 1) * 7 + 7));
-  const sourceText = (concept.sources || []).join(" ").toLowerCase();
-  const platformSignals = ["reddit", "instagram", "tiktok", "pinterest", "meme", "vogue"].filter(signal => sourceText.includes(signal)).length;
-  const crossPlatform = Math.min(15, platformSignals * 4 + (concept.source_count >= 3 ? 3 : 0));
-  const repetition = Math.min(10, (concept.candidates?.length || concept.source_urls?.length || 1) * 2);
-  return clamp(recency + sourceDiversity + crossPlatform + repetition);
+  const recency = age <= 2 ? 35 : age <= 7 ? 31 : age <= 14 ? 23 : age <= 30 ? 14 : 4;
+  const independentSources = Math.min(25, Number(concept.independent_source_count || 0) * 5);
+  const recentSignals = Math.min(20, Number(concept.recent_source_count_7d || 0) * 5);
+  const crossPlatform = Math.min(10, Number(concept.cross_platform_count || 0) * 4);
+  const repetition = Math.min(10, Number(concept.source_count || concept.candidates?.length || 0) * 2);
+  const raw = clamp(recency + independentSources + recentSignals + crossPlatform + repetition);
+  return applyEvidenceCap(raw, concept.evidence_strength || 0, evidenceConfig.trendScoreCaps || []);
 }
 
 function calculateTotalScore(scores, weights) {
@@ -27,9 +32,10 @@ function calculateTotalScore(scores, weights) {
   return Number((weighted / totalWeight).toFixed(1));
 }
 
-function scoreConcept(concept, { weights, now = new Date(), performancePotential = 50 } = {}) {
+function scoreConcept(concept, { weights, evidenceConfig = {}, now = new Date(), performancePotential = 50 } = {}) {
   const scores = {
-    trend_score: calculateTrendScore(concept, now),
+    trend_score: calculateTrendScore(concept, now, evidenceConfig),
+    evidence_strength: clamp(concept.evidence_strength || 0),
     pet_adaptability: clamp(concept.baseline_scores.pet_adaptability),
     visual_impact: clamp(concept.baseline_scores.visual_impact),
     replicability: clamp(concept.baseline_scores.replicability),
@@ -37,7 +43,15 @@ function scoreConcept(concept, { weights, now = new Date(), performancePotential
     novelty: clamp(concept.novelty ?? 100),
     performance_potential: clamp(performancePotential)
   };
-  return { ...concept, ...scores, total_score: calculateTotalScore(scores, weights) };
+  const rawTotalScore = calculateTotalScore(scores, weights);
+  const weakPenalty = concept.weak_signal ? Number(evidenceConfig.weakSignalPenalty || 0) : 0;
+  return {
+    ...concept,
+    ...scores,
+    raw_total_score: rawTotalScore,
+    weak_signal_penalty: weakPenalty,
+    total_score: Number(Math.max(0, rawTotalScore - weakPenalty).toFixed(1))
+  };
 }
 
-export { calculateTotalScore, calculateTrendScore, clamp, daysOld, scoreConcept };
+export { applyEvidenceCap, calculateTotalScore, calculateTrendScore, clamp, daysOld, scoreConcept };

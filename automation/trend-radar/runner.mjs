@@ -7,6 +7,7 @@ import configDefaults from "./config.mjs";
 import { collectReddit } from "./collectors/reddit-collector.mjs";
 import { collectEditorialPages, collectSearchResults } from "./collectors/web-collector.mjs";
 import { filterRecentDuplicates } from "./dedupe.mjs";
+import { validateTrendEvidence } from "./evidence.mjs";
 import { calculateTotalScore, scoreConcept } from "./scorer.mjs";
 import {
   appendRadarLog,
@@ -15,8 +16,9 @@ import {
   loadCachedConcepts,
   loadPerformanceScores,
   loadPostHistory,
-  loadTrendHistory,
+  loadTrendHistoryData,
   readJson,
+  recordRadarSnapshot,
   recordSelection,
   writeJson
 } from "./storage.mjs";
@@ -69,10 +71,22 @@ function publicConcept(concept) {
     concept_id: concept.concept_id,
     title: concept.title,
     description: concept.description,
-    source_urls: concept.source_urls,
+    original_trend: concept.original_trend,
+    pet_adaptation: concept.pet_adaptation,
+    source_urls: concept.source_evidence.map(item => item.url).filter(Boolean),
     source_count: concept.source_count,
+    independent_source_count: concept.independent_source_count,
+    recent_source_count_7d: concept.recent_source_count_7d,
+    recent_source_count_30d: concept.recent_source_count_30d,
+    cross_platform_count: concept.cross_platform_count,
     first_seen_at: concept.first_seen_at,
     last_seen_at: concept.last_seen_at,
+    latest_source_date: concept.latest_source_date,
+    evidence_strength: concept.evidence_strength,
+    evidence_components: concept.evidence_components,
+    source_evidence: concept.source_evidence,
+    weak_signal: concept.weak_signal,
+    trend_momentum: concept.trend_momentum,
     trend_score: concept.trend_score,
     pet_adaptability: concept.pet_adaptability,
     visual_impact: concept.visual_impact,
@@ -81,10 +95,13 @@ function publicConcept(concept) {
     novelty: concept.novelty,
     performance_potential: concept.performance_potential,
     total_score: concept.total_score,
+    raw_total_score: concept.raw_total_score,
+    weak_signal_penalty: concept.weak_signal_penalty,
     dog_fit_score: concept.dog_fit_score,
     cat_fit_score: concept.cat_fit_score,
     hamster_fit_score: concept.hamster_fit_score,
-    why_trending: `${concept.source_count}개 독립 출처에서 최근 ${concept.candidates?.length || concept.source_urls?.length || 1}건의 신호가 감지됨`,
+    why_trending: concept.why_trending_evidence.join("; "),
+    why_trending_evidence: concept.why_trending_evidence,
     why_good_for_pet_account: "보호자 사진 한 장을 명확한 반려동물 중심 장면으로 바꾸고 ‘우리 아이로 만들어보세요’ CTA에 연결할 수 있음",
     dog_adaptation: concept.dog_adaptation,
     cat_adaptation: concept.cat_adaptation,
@@ -97,9 +114,12 @@ function publicConcept(concept) {
   };
 }
 
-async function analyzeAndScore(candidates, { config, accountName, now = new Date(), postHistory = [], trendHistory = [], performanceScores = { defaultScore: 50, concepts: {} } }) {
-  const clusters = clusterCandidates(candidates).map(concept => adaptConcept(concept, accountName));
-  const recentTrendSelections = trendHistory
+async function analyzeAndScore(candidates, { config, accountName, now = new Date(), postHistory = [], historyData = { selections: [], snapshots: [] }, performanceScores = { defaultScore: 50, concepts: {} } }) {
+  const rawClusters = clusterCandidates(candidates);
+  const evidenceResults = rawClusters.map(concept => validateTrendEvidence(concept, { config, now, historyData }));
+  const invalidEvidence = evidenceResults.filter(result => !result.valid);
+  const clusters = evidenceResults.filter(result => result.valid).map(result => adaptConcept(result.concept, accountName));
+  const recentTrendSelections = (historyData.selections || [])
     .filter(item => now.getTime() - new Date(item.selected_at).getTime() <= config.recentPostDays * 86_400_000)
     .map(item => ({ concept_title: item.concept_title }));
   const relevantPosts = postHistory.filter(post => !post.account_key || post.account_key === accountName);
@@ -107,13 +127,23 @@ async function analyzeAndScore(candidates, { config, accountName, now = new Date
   const concepts = included
     .map(concept => scoreConcept(concept, {
       weights: config.weights,
+      evidenceConfig: config.evidence,
       now,
       performancePotential: Number(performanceScores.concepts[concept.concept_key] ?? performanceScores.defaultScore ?? 50)
     }))
     .sort((a, b) => b.total_score - a.total_score)
     .slice(0, config.maximumConcepts)
     .map(publicConcept);
-  return { concepts, clusterCount: clusters.length, duplicateCount: excluded.length, excluded };
+  return {
+    concepts,
+    clusterCount: rawClusters.length,
+    evidenceValidatedCount: clusters.length,
+    ungroundedCount: invalidEvidence.length,
+    weakSignalCount: concepts.filter(concept => concept.weak_signal).length,
+    duplicateCount: excluded.length,
+    excluded,
+    invalidEvidence
+  };
 }
 
 async function runTrendRadar({
@@ -137,20 +167,24 @@ async function runTrendRadar({
       ? { candidates: uniqueCandidates(inputCandidates), errors: [], collectorStats: { fixture: inputCandidates.length }, usedWindowDays: config.recentWindowDays }
       : await collectCandidates({ config, fetchImpl, now });
     if (!collection.candidates.length) throw new Error("수집된 trend candidate가 없습니다.");
-    const [postHistory, trendHistory, performanceScores] = await Promise.all([
+    const [postHistory, historyData, performanceScores] = await Promise.all([
       loadPostHistory(config, now),
-      loadTrendHistory(config),
+      loadTrendHistoryData(config),
       loadPerformanceScores(config, accountName)
     ]);
-    const analysis = await analyzeAndScore(collection.candidates, { config, accountName, now, postHistory, trendHistory, performanceScores });
+    const analysis = await analyzeAndScore(collection.candidates, { config, accountName, now, postHistory, historyData, performanceScores });
     if (!analysis.concepts.length) throw new Error("분석 및 중복 제거 후 유효한 concept가 없습니다.");
     const result = {
+      schema_version: 2,
       generated_at: now.toISOString(),
       account_name: accountName,
       cache_ttl_hours: config.cacheTtlHours,
       window_days: collection.usedWindowDays,
       candidate_count: collection.candidates.length,
       cluster_count: analysis.clusterCount,
+      evidence_validated_count: analysis.evidenceValidatedCount,
+      ungrounded_count: analysis.ungroundedCount,
+      weak_signal_count: analysis.weakSignalCount,
       duplicate_count: analysis.duplicateCount,
       collector_stats: collection.collectorStats,
       errors: collection.errors,
@@ -159,6 +193,7 @@ async function runTrendRadar({
     };
     await writeJson(paths.candidates, { generated_at: now.toISOString(), candidates: collection.candidates });
     await writeJson(paths.concepts, result);
+    await recordRadarSnapshot(config, analysis.concepts, now);
     if (await readJson(paths.performance, null) === null) {
       await writeJson(paths.performance, { updated_at: null, accounts: {}, note: "Insights 표본이 충분해지기 전에는 performance_potential=50을 사용합니다." });
     }
@@ -166,6 +201,8 @@ async function runTrendRadar({
       source_count: new Set(collection.candidates.map(item => item.source)).size,
       raw_candidate_count: collection.candidates.length,
       concept_count: analysis.clusterCount,
+      evidence_validated_count: analysis.evidenceValidatedCount,
+      weak_signal_count: analysis.weakSignalCount,
       duplicate_count: analysis.duplicateCount,
       top_concept: analysis.concepts[0]?.title,
       errors: collection.errors
@@ -175,7 +212,7 @@ async function runTrendRadar({
     await appendRadarLog(config, "fallback", { account_name: accountName, reason: error.message }, now);
     if (allowStaleFallback) {
       const cached = await loadCachedConcepts(config);
-      if (cached?.concepts?.length) return { ...cached, cache_hit: true, stale_fallback: true, fallback_reason: error.message };
+      if (cached?.schema_version === 2 && cached?.concepts?.length) return { ...cached, cache_hit: true, stale_fallback: true, fallback_reason: error.message };
     }
     throw error;
   }
@@ -185,7 +222,8 @@ async function getBestTrendForAccount(accountName, options = {}) {
   try {
     const result = await runTrendRadar({ accountName, ...options });
     const accountFitKey = String(accountName).toLowerCase() === "hamnimi" ? "hamster_fit_score" : String(accountName).toLowerCase() === "cat" ? "cat_fit_score" : "dog_fit_score";
-    const rescored = result.concepts
+    const eligibleConcepts = result.concepts.filter(concept => !concept.weak_signal);
+    const rescored = eligibleConcepts
       .map(concept => {
         const accountFit = concept[accountFitKey] ?? concept.account_fit;
         const scores = { ...concept, account_fit: accountFit };
@@ -212,16 +250,29 @@ async function resolveIdeaWithTrendRadar({ accountName, legacyIdea = null, radar
   }
 }
 
-function printTopConcepts(result, limit = 10) {
+function printTopConcepts(result, limit = 10, { showEvidence = false } = {}) {
   console.log(`TREND RADAR — ${result.generated_at.slice(0, 10)}${result.cache_hit ? " (CACHE)" : ""}`);
-  console.log(`Candidates ${result.candidate_count} · Concepts ${result.cluster_count} · Duplicates ${result.duplicate_count}\n`);
+  console.log(`Account: ${result.account_name}`);
+  console.log(`Candidates ${result.candidate_count} · Concepts ${result.cluster_count} · Weak ${result.weak_signal_count || 0} · Duplicates ${result.duplicate_count}\n`);
   result.concepts.slice(0, limit).forEach((concept, index) => {
-    console.log(`#${index + 1} ${concept.title}`);
-    console.log(`Trend: ${concept.trend_score} · Pet: ${concept.pet_adaptability} · Visual: ${concept.visual_impact} · Replicable: ${concept.replicability} · Fit: ${concept.account_fit} · Novelty: ${concept.novelty}`);
-    console.log(`TOTAL: ${concept.total_score}`);
-    console.log(`WHY NOW: ${concept.why_trending}`);
-    console.log(`PET ADAPTATION: ${concept.dog_adaptation}`);
-    console.log(`HAMSTER ADAPTATION: ${concept.hamster_adaptation}`);
+    const accountAdaptation = result.account_name === "hamnimi" ? concept.hamster_adaptation : result.account_name === "cat" ? concept.cat_adaptation : concept.dog_adaptation;
+    console.log(`#${index + 1} ${concept.title} — ${concept.total_score}${concept.weak_signal ? " [WEAK SIGNAL]" : ""}`);
+    console.log("\nORIGINAL TREND");
+    console.log(concept.original_trend);
+    console.log("\nPET ADAPTATION");
+    console.log(accountAdaptation);
+    console.log("\nSCORES");
+    console.log(`Trend: ${concept.trend_score} · Evidence: ${concept.evidence_strength} · Pet: ${concept.pet_adaptability} · Visual: ${concept.visual_impact} · Replicable: ${concept.replicability} · Fit: ${concept.account_fit} · Novelty: ${concept.novelty}`);
+    console.log("\nEVIDENCE");
+    console.log(`Independent sources: ${concept.independent_source_count} · Recent 7d: ${concept.recent_source_count_7d} · Recent 30d: ${concept.recent_source_count_30d} · Platforms: ${concept.cross_platform_count}`);
+    console.log(`Latest signal: ${concept.latest_source_date?.slice(0, 10) || "unknown"} · Momentum: ${concept.trend_momentum}`);
+    console.log("\nWHY TRENDING");
+    concept.why_trending_evidence.forEach(reason => console.log(`- ${reason}`));
+    console.log("\nTOP SOURCES");
+    concept.source_evidence.slice(0, showEvidence ? concept.source_evidence.length : 3).forEach((source, sourceIndex) => {
+      console.log(`${sourceIndex + 1}. ${source.title} — ${source.published_at?.slice(0, 10) || "date unknown"}${source.is_independent ? " · independent" : " · duplicate/related"}`);
+      if (showEvidence) console.log(`   ${source.source_name} · ${source.source_type} · ${source.platform} · q=${source.source_quality} · ${source.url}`);
+    });
     console.log("--------------------------------");
   });
 }
@@ -239,7 +290,7 @@ async function main() {
     forceRefresh: process.argv.includes("--refresh") || Boolean(fixture),
     inputCandidates: fixture?.candidates || fixture
   });
-  printTopConcepts(result, Number(option("--limit", 10)));
+  printTopConcepts(result, Number(option("--limit", 10)), { showEvidence: process.argv.includes("--show-evidence") });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

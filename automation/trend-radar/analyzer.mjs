@@ -184,7 +184,7 @@ const conceptRules = [
   },
   {
     key: "sports-lifestyle-editorial",
-    patterns: [/tenniscore/i, /sports.{0,20}(lifestyle|fashion|street style)/i, /athlete.backed/i],
+    patterns: [/tenniscore/i, /sports.{0,20}(lifestyle|fashion|street style)/i],
     title: "Pet Sports-Lifestyle Editorial",
     description: "운동 경기의 유니폼, 코트 선, 땀과 응원 문화를 일상 패션 화보로 번역",
     adaptation: "반려동물을 경기 전 코트에 선 작은 스포츠 스타처럼 촬영",
@@ -220,7 +220,7 @@ const conceptRules = [
   },
   {
     key: "nostalgia-time-capsule",
-    patterns: [/time capsule/i, /2008 vs 2026/i, /before the infinite camera roll/i, /millennial nostalgia/i],
+    patterns: [/time capsule/i, /\b\d{4}\s+(?:vs|versus)\s+\d{4}\b/i, /then.{0,12}(?:vs|versus).{0,12}now/i],
     title: "Then-vs-Now Pet Time Capsule",
     description: "과거의 낮은 화질 사진과 현재 사진을 같은 자세·장소·구도로 재현하는 시간 비교",
     adaptation: "반려동물의 어린 시절과 지금을 같은 가족사진 구도로 나란히 보여주는 타임캡슐",
@@ -301,6 +301,42 @@ const conceptRules = [
   }
 ];
 
+const originalTrendByKey = {
+  "retro-direct-flash-dump": "Direct-flash casual photo dumps and Y2K digital-camera photography",
+  "scrapbook-carousel": "Scrapbook-style carousel and mini-magazine layouts",
+  "august-photo-grid": "Monthly recap photo grids and August photo dumps",
+  "documentary-confession": "Unposed documentary snapshots with confession-style subtitles",
+  "paparazzi-chaos": "Paparazzi flash and behind-the-scenes photo-shoot framing",
+  "color-hunt": "Single-colour photography hunts",
+  "glitchy-glam": "Intentionally imperfect and mismatched glitchy glamour",
+  "y2k-bedazzled": "Y2K rhinestone and bedazzled styling",
+  "glamoratti-power": "1980s power dressing and Glamoratti maximalism",
+  "cool-blue-glacier": "Icy-blue and glacier aesthetics",
+  "throwback-childhood": "Childhood nostalgia and retro-toy throwbacks",
+  "niche-costume": "Niche Halloween and runway-reference costumes",
+  "dark-balletcore": "Darker performance-led balletcore",
+  "clone-crowd": "Repeated-character and clone-crowd AI imagery",
+  "cinematic-motion-blur": "Cinematic motion blur and imperfect night exposure",
+  "fashion-magazine-cover": "Fashion-editorial magazine cover portraits",
+  "miniature-world": "Miniature worlds and dramatic scale contrast",
+  "poetcore-portrait": "Poetcore and literary aesthetics",
+  "alien-core": "Alien-core and retro science-fiction portraiture",
+  "festive-heritage-transform": "AI festive heritage portrait transformations",
+  "sports-lifestyle-editorial": "Sports-as-lifestyle and tenniscore editorials",
+  "aura-farming-standoff": "Aura-farming poses and viral public standoffs",
+  "absurd-character-horror": "Unexpected familiar-character horror cameos",
+  "rainbow-dolphin-surreal": "Rainbow Dolphin and Symphony Dolphin meme imagery",
+  "nostalgia-time-capsule": "Then-versus-now and nostalgia time-capsule portraits",
+  "toy-scene-reenactment": "Household-toy recreations of familiar movie scenes",
+  "cinematic-place-postcard": "Cinematic location and travel photography",
+  "parallel-self-swap": "Consistent-character and parallel-self image transformations",
+  "eye-contact-campaign": "Direct-eye-contact advertising close-ups",
+  "color-drenching": "Monochromatic colour-drenched rooms and sets",
+  "cozy-hands-on-hobby": "Screen-free cozy hands-on hobbies",
+  "curated-clutter-maximalism": "Curated-clutter maximalist interiors",
+  "statement-metal-accessory": "Oversized statement-metal accessories"
+};
+
 function conceptId(key) {
   return `trend-${createHash("sha1").update(key).digest("hex").slice(0, 12)}`;
 }
@@ -309,10 +345,13 @@ function analyzeCandidate(candidate) {
   const text = `${candidate.title} ${candidate.description} ${(candidate.keywords || []).join(" ")}`;
   const rule = conceptRules.find(item => item.patterns.some(pattern => pattern.test(text)));
   if (!rule) return null;
+  const matchedPatterns = rule.patterns.filter(pattern => pattern.test(text)).map(pattern => pattern.source);
   return {
     concept_id: conceptId(rule.key),
     concept_key: rule.key,
     title: rule.title,
+    original_trend: originalTrendByKey[rule.key] || candidate.title,
+    pet_adaptation: rule.title,
     description: rule.description,
     adaptation: rule.adaptation,
     keywords: keywordsFromText(`${rule.title} ${rule.description} ${rule.adaptation}`),
@@ -323,8 +362,10 @@ function analyzeCandidate(candidate) {
       account_fit: rule.scores[3]
     },
     fit_scores: { dog: rule.fits[0], cat: rule.fits[1], hamster: rule.fits[2] },
+    grounding_patterns: matchedPatterns,
+    grounded_candidate_urls: candidate.source_url ? [candidate.source_url] : [],
     candidates: [candidate]
   };
 }
 
-export { analyzeCandidate, conceptId, conceptRules };
+export { analyzeCandidate, conceptId, conceptRules, originalTrendByKey };

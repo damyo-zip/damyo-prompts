@@ -35,7 +35,7 @@ function dataPaths(config) {
 async function cacheIsFresh(config, now = new Date()) {
   const paths = dataPaths(config);
   const cached = await readJson(paths.concepts, null);
-  if (!cached?.generated_at || !Array.isArray(cached.concepts) || !cached.concepts.length) return false;
+  if (cached?.schema_version !== 2 || !cached?.generated_at || !Array.isArray(cached.concepts) || !cached.concepts.length) return false;
   const ageHours = (now.getTime() - new Date(cached.generated_at).getTime()) / 3_600_000;
   return ageHours >= 0 && ageHours < config.cacheTtlHours;
 }
@@ -70,8 +70,17 @@ async function loadPostHistory(config, now = new Date()) {
 }
 
 async function loadTrendHistory(config) {
-  const value = await readJson(dataPaths(config).history, { selections: [] });
+  const value = await loadTrendHistoryData(config);
   return Array.isArray(value?.selections) ? value.selections : [];
+}
+
+async function loadTrendHistoryData(config) {
+  const value = await readJson(dataPaths(config).history, { selections: [], snapshots: [] });
+  return {
+    updated_at: value?.updated_at || null,
+    selections: Array.isArray(value?.selections) ? value.selections : [],
+    snapshots: Array.isArray(value?.snapshots) ? value.snapshots : []
+  };
 }
 
 async function loadPerformanceScores(config, accountName) {
@@ -85,9 +94,27 @@ async function loadPerformanceScores(config, accountName) {
 
 async function recordSelection(config, selection, now = new Date()) {
   const paths = dataPaths(config);
-  const selections = await loadTrendHistory(config);
-  selections.push({ selected_at: now.toISOString(), account_name: selection.account_name, concept_id: selection.concept.concept_id, concept_title: selection.concept.title });
-  await writeJson(paths.history, { updated_at: now.toISOString(), selections: selections.slice(-200) });
+  const history = await loadTrendHistoryData(config);
+  history.selections.push({ selected_at: now.toISOString(), account_name: selection.account_name, concept_id: selection.concept.concept_id, concept_title: selection.concept.title });
+  await writeJson(paths.history, { ...history, updated_at: now.toISOString(), selections: history.selections.slice(-200) });
 }
 
-export { appendRadarLog, cacheIsFresh, dataPaths, loadCachedConcepts, loadPerformanceScores, loadPostHistory, loadTrendHistory, readJson, recordSelection, writeJson };
+async function recordRadarSnapshot(config, concepts, now = new Date()) {
+  const paths = dataPaths(config);
+  const history = await loadTrendHistoryData(config);
+  history.snapshots.push({
+    captured_at: now.toISOString(),
+    concepts: concepts.map(concept => ({
+      concept_id: concept.concept_id,
+      original_trend: concept.original_trend,
+      source_count: concept.source_count,
+      independent_source_count: concept.independent_source_count,
+      recent_source_count_7d: concept.recent_source_count_7d,
+      cross_platform_count: concept.cross_platform_count,
+      evidence_strength: concept.evidence_strength
+    }))
+  });
+  await writeJson(paths.history, { ...history, updated_at: now.toISOString(), snapshots: history.snapshots.slice(-120) });
+}
+
+export { appendRadarLog, cacheIsFresh, dataPaths, loadCachedConcepts, loadPerformanceScores, loadPostHistory, loadTrendHistory, loadTrendHistoryData, readJson, recordRadarSnapshot, recordSelection, writeJson };

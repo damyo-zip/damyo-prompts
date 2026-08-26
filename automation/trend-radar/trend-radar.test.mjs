@@ -9,8 +9,15 @@ import { parseRss } from "./collectors/candidate-parser.mjs";
 import { clusterCandidates } from "./concept-clusterer.mjs";
 import defaults from "./config.mjs";
 import { filterRecentDuplicates, semanticSimilarity } from "./dedupe.mjs";
+import {
+  calculateEvidenceStrength,
+  calculateTrendMomentum,
+  isWeakSignal,
+  validateOriginalTrendGrounding,
+  validateTrendEvidence
+} from "./evidence.mjs";
 import { getBestTrendForAccount, resolveIdeaWithTrendRadar, runTrendRadar } from "./runner.mjs";
-import { calculateTotalScore, scoreConcept } from "./scorer.mjs";
+import { applyEvidenceCap, calculateTotalScore, scoreConcept } from "./scorer.mjs";
 import { cacheIsFresh } from "./storage.mjs";
 
 const fixedNow = new Date("2026-08-26T00:00:00.000Z");
@@ -25,6 +32,23 @@ function candidate(title, source = "Example", url = `https://example.com/${encod
     collected_at: fixedNow.toISOString(),
     keywords: title.toLowerCase().split(/\s+/)
   };
+}
+
+function evidenceCandidate(title, source, url, publishedAt, platform = "web", sourceType = "news_article") {
+  return {
+    ...candidate(title, source, url),
+    published_at: publishedAt,
+    platform,
+    source_type: sourceType,
+    collector: "fixture"
+  };
+}
+
+function validatedConcept(candidates, config = defaults, now = fixedNow, historyData = {}) {
+  const cluster = clusterCandidates(candidates)[0];
+  const result = validateTrendEvidence(cluster, { config, now, historyData });
+  assert.equal(result.valid, true);
+  return result.concept;
 }
 
 async function temporaryConfig(overrides = {}) {
@@ -61,10 +85,14 @@ test("concept clustering joins semantically identical candidates", () => {
 test("scoring and weighted total calculation are deterministic", () => {
   const total = calculateTotalScore({ a: 100, b: 50 }, { a: 0.75, b: 0.25 });
   assert.equal(total, 87.5);
-  const concept = adaptConcept(clusterCandidates([candidate("Paparazzi trend")])[0], "kongi");
-  const scored = scoreConcept({ ...concept, novelty: 90 }, { weights: defaults.weights, now: fixedNow });
-  assert.ok(scored.total_score >= 80 && scored.total_score <= 100);
+  const concept = adaptConcept(validatedConcept([
+    evidenceCandidate("Paparazzi trend photo shoot", "A", "https://a.example/1", "2026-08-25T00:00:00Z", "instagram"),
+    evidenceCandidate("Behind-the-scenes shoot paparazzi framing", "B", "https://b.example/1", "2026-08-24T00:00:00Z", "fashion_editorial")
+  ]), "kongi");
+  const scored = scoreConcept({ ...concept, novelty: 90 }, { weights: defaults.weights, evidenceConfig: defaults.evidence, now: fixedNow });
+  assert.ok(scored.total_score >= 60 && scored.total_score <= 100);
   assert.equal(scored.account_fit, scored.dog_fit_score);
+  assert.ok(scored.evidence_strength > 0);
 });
 
 test("recent semantic duplicate is excluded and novelty falls", () => {
@@ -87,7 +115,10 @@ test("account adaptation keeps separate dog, cat, and hamster fit", () => {
 
 test("fresh cache prevents network recollection", async () => {
   const config = await temporaryConfig();
-  await runTrendRadar({ config, now: fixedNow, forceRefresh: true, inputCandidates: [candidate("Paparazzi trend")] });
+  await runTrendRadar({ config, now: fixedNow, forceRefresh: true, inputCandidates: [
+    evidenceCandidate("Paparazzi trend photo shoot", "A", "https://a.example/1", "2026-08-25T00:00:00Z", "instagram"),
+    evidenceCandidate("Behind-the-scenes shoot paparazzi framing", "B", "https://b.example/1", "2026-08-24T00:00:00Z", "fashion_editorial")
+  ] });
   assert.equal(await cacheIsFresh(config, new Date("2026-08-26T01:00:00Z")), true);
   const cached = await runTrendRadar({
     config,
@@ -146,4 +177,125 @@ test("valid radar result becomes the idea input", async () => {
   });
   assert.equal(resolved.source, "trend_radar");
   assert.equal(resolved.idea.concept_id, "trend-1");
+});
+
+test("independent source deduplication collapses same publisher and syndicated headline", () => {
+  const concept = validatedConcept([
+    evidenceCandidate("Direct flash photo dump is back", "Publisher A", "https://a.example/one", "2026-08-25T00:00:00Z", "instagram"),
+    evidenceCandidate("Y2K digital camera revival", "Publisher A", "https://a.example/two", "2026-08-24T00:00:00Z", "instagram"),
+    evidenceCandidate("Direct flash photo dump is back", "Publisher Mirror", "https://mirror.example/copy", "2026-08-25T00:00:00Z", "web"),
+    evidenceCandidate("Polaroid and imperfect exposure photography", "Publisher B", "https://b.example/original", "2026-08-23T00:00:00Z", "photography")
+  ]);
+  assert.equal(concept.source_count, 4);
+  assert.equal(concept.independent_source_count, 2);
+  assert.equal(concept.source_evidence.filter(item => item.is_independent).length, 2);
+});
+
+test("cross-platform counting uses independent evidence channels", () => {
+  const concept = validatedConcept([
+    evidenceCandidate("Instagram direct flash photo dump", "A", "https://a.example/1", "2026-08-25T00:00:00Z", "instagram"),
+    evidenceCandidate("TikTok Y2K digital camera revival", "B", "https://b.example/1", "2026-08-24T00:00:00Z", "tiktok"),
+    evidenceCandidate("Pinterest Polaroid photography moodboard", "C", "https://c.example/1", "2026-08-23T00:00:00Z", "pinterest")
+  ]);
+  assert.equal(concept.cross_platform_count, 3);
+});
+
+test("7d and 30d recency counts exclude old and undated evidence", () => {
+  const concept = validatedConcept([
+    evidenceCandidate("Direct flash photo dump", "A", "https://a.example/1", "2026-08-25T00:00:00Z", "instagram"),
+    evidenceCandidate("Y2K digital camera photography", "B", "https://b.example/1", "2026-08-16T00:00:00Z", "photography"),
+    evidenceCandidate("Retro Polaroid revival", "C", "https://c.example/1", "2026-07-01T00:00:00Z", "fashion_editorial"),
+    evidenceCandidate("Imperfect exposure direct flash", "D", "https://d.example/1", null, "web")
+  ]);
+  assert.equal(concept.recent_source_count_7d, 1);
+  assert.equal(concept.recent_source_count_30d, 2);
+  assert.equal(concept.latest_source_date, "2026-08-25T00:00:00.000Z");
+});
+
+test("evidence strength rewards independent recent cross-platform sources", () => {
+  const high = calculateEvidenceStrength({
+    independent_source_count: 5,
+    recent_source_count_7d: 4,
+    recent_source_count_30d: 5,
+    cross_platform_count: 3,
+    average_source_quality: 0.9,
+    latest_source_date: "2026-08-25T00:00:00Z"
+  }, defaults, fixedNow).evidence_strength;
+  const low = calculateEvidenceStrength({
+    independent_source_count: 1,
+    recent_source_count_7d: 0,
+    recent_source_count_30d: 0,
+    cross_platform_count: 1,
+    average_source_quality: 0.35,
+    latest_source_date: null
+  }, defaults, fixedNow).evidence_strength;
+  assert.ok(high >= 90);
+  assert.ok(low < 30);
+});
+
+test("trend score is capped by evidence strength", () => {
+  assert.equal(applyEvidenceCap(96, 20, defaults.evidence.trendScoreCaps), 50);
+  assert.equal(applyEvidenceCap(96, 40, defaults.evidence.trendScoreCaps), 70);
+  assert.equal(applyEvidenceCap(96, 60, defaults.evidence.trendScoreCaps), 85);
+  assert.equal(applyEvidenceCap(96, 80, defaults.evidence.trendScoreCaps), 96);
+});
+
+test("weak signal handling marks and penalizes one-source concepts", () => {
+  const concept = adaptConcept(validatedConcept([
+    evidenceCandidate("Paparazzi trend photo shoot", "A", "https://a.example/1", "2026-08-25T00:00:00Z", "instagram")
+  ]), "kongi");
+  assert.equal(isWeakSignal(concept, defaults), true);
+  const scored = scoreConcept({ ...concept, novelty: 90 }, { weights: defaults.weights, evidenceConfig: defaults.evidence, now: fixedNow });
+  assert.equal(scored.weak_signal_penalty, defaults.evidence.weakSignalPenalty);
+  assert.equal(scored.total_score, Number((scored.raw_total_score - defaults.evidence.weakSignalPenalty).toFixed(1)));
+});
+
+test("source provenance is preserved in final concept evidence", () => {
+  const input = evidenceCandidate("Direct flash photo dump", "Photo Daily", "https://photo.example/story", "2026-08-25T00:00:00Z", "instagram", "professional_media");
+  const concept = validatedConcept([input]);
+  assert.deepEqual(concept.source_evidence[0], {
+    source_name: "Photo Daily",
+    source_type: "professional_media",
+    platform: "instagram",
+    domain: "photo.example",
+    url: "https://photo.example/story",
+    title: "Direct flash photo dump",
+    published_at: "2026-08-25T00:00:00.000Z",
+    date_status: "known",
+    source_quality: 0.88,
+    signal_summary: "Direct flash photo dump — Direct flash photo dump is rising across visual social platforms",
+    publisher_key: "photo.example",
+    is_independent: true,
+    independent_group: "source-group-01"
+  });
+});
+
+test("original trend and pet adaptation remain explicitly separated", () => {
+  const analyzed = analyzeCandidate(candidate("Retro direct flash photo dump"));
+  assert.equal(analyzed.original_trend, "Direct-flash casual photo dumps and Y2K digital-camera photography");
+  assert.equal(analyzed.pet_adaptation, "Retro Direct-Flash Pet Dump");
+  assert.notEqual(analyzed.original_trend, analyzed.pet_adaptation);
+});
+
+test("hallucinated original trend without source grounding is rejected", () => {
+  const fabricated = {
+    concept_id: "fake",
+    original_trend: "Rainbow Cosmic Pet Dream Portal",
+    pet_adaptation: "Cosmic Pet Portal",
+    candidates: [candidate("Direct flash photo dump")],
+    grounding_patterns: [],
+    grounded_candidate_urls: []
+  };
+  assert.equal(validateOriginalTrendGrounding(fabricated), false);
+  assert.equal(validateTrendEvidence(fabricated, { config: defaults, now: fixedNow }).reason, "original_trend_not_grounded");
+});
+
+test("trend momentum compares the latest prior evidence snapshot", () => {
+  const concept = { concept_id: "trend-1", independent_source_count: 6 };
+  assert.equal(calculateTrendMomentum(concept, {}, fixedNow), "unknown");
+  const history = { snapshots: [{ captured_at: "2026-08-25T00:00:00Z", concepts: [{ concept_id: "trend-1", independent_source_count: 2 }] }] };
+  assert.equal(calculateTrendMomentum(concept, history, fixedNow), "rising");
+  assert.equal(calculateTrendMomentum({ ...concept, concept_id: "new" }, history, fixedNow), "new");
+  assert.equal(calculateTrendMomentum({ ...concept, independent_source_count: 1 }, { snapshots: [{ captured_at: "2026-08-25T00:00:00Z", concepts: [{ concept_id: "trend-1", independent_source_count: 6 }] }] }, fixedNow), "declining");
+  assert.equal(calculateTrendMomentum({ ...concept, independent_source_count: 3 }, { snapshots: [{ captured_at: "2026-08-25T00:00:00Z", concepts: [{ concept_id: "trend-1", independent_source_count: 3 }] }] }, fixedNow), "stable");
 });
