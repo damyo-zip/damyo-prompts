@@ -24,6 +24,7 @@ import {
   savePublishedPostMetadata,
   updateInstagramInsights
 } from "./insights.mjs";
+import { ideaGuidanceForSelection, selectIdeaSource, selectionLogDetails } from "./idea-selector.mjs";
 import { getBestTrendForAccount } from "./trend-radar/index.mjs";
 
 const automationDir = dirname(fileURLToPath(import.meta.url));
@@ -235,6 +236,29 @@ async function readSiteData() {
   return { source, ...parsePromptsSource(source) };
 }
 
+async function loadRecentIdeaSelectionHistory(now = new Date(), limit = 30, days = 60) {
+  const cutoff = now.getTime() - days * 86_400_000;
+  const items = [];
+  let entries = [];
+  try {
+    entries = await readdir(postsDir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    const value = await readJson(join(postsDir, entry.name), null);
+    if (!value) continue;
+    const timestamp = new Date(value.published_at || value.created_at || value.updated_at || 0).getTime();
+    if (!timestamp || timestamp >= cutoff) items.push({ ...value, _selection_timestamp: timestamp || 0 });
+  }
+  return items
+    .sort((left, right) => right._selection_timestamp - left._selection_timestamp)
+    .slice(0, limit)
+    .map(({ _selection_timestamp, ...item }) => item);
+}
+
 function getAnimal(item) {
   return ["cat", "dog", "small"].includes(item?.animal) ? item.animal : "cat";
 }
@@ -347,13 +371,26 @@ async function commandPreflight() {
   const site = summarizeSite(PROMPTS);
   if (site.duplicate_ids.length) throw new Error(`중복 ID가 있습니다: ${site.duplicate_ids.join(", ")}`);
 
-  const trendRecommendation = await getBestTrendForAccount(accountConfig.accountKey);
-
   const previous = await readJson(statePath, null);
   const runId = activeState(previous) ? previous.run_id : `${accountConfig.accountKey}-${localTimestamp()}-${randomSuffix()}`;
   const postId = activeState(previous) ? previous.post_id : site.next_id;
   const runDir = join(runsDir, runId);
   await mkdir(runDir, { recursive: true });
+  const [trendRecommendation, recentHistoryResult] = await Promise.all([
+    getBestTrendForAccount(accountConfig.accountKey),
+    loadRecentIdeaSelectionHistory()
+      .then(items => ({ items, error: null }))
+      .catch(error => ({ items: [], error: error.message }))
+  ]);
+  if (recentHistoryResult.error) {
+    await appendLog(runId, "idea_selection_history_failed", { error: recentHistoryResult.error });
+  }
+  const ideaSelection = await selectIdeaSource({
+    accountName: accountConfig.accountKey,
+    recentPosts: [...site.account_posts.slice(0, 30), ...recentHistoryResult.items]
+  });
+  const ideaGuidance = ideaGuidanceForSelection(ideaSelection, accountConfig.ideaGuidance);
+  await appendLog(runId, "idea_selection", selectionLogDetails(ideaSelection));
   const payload = {
     run_id: runId,
     account_key: accountConfig.accountKey,
@@ -365,7 +402,12 @@ async function commandPreflight() {
     baseline_commit: activeState(previous) ? previous.baseline_commit : snapshot.head,
     existing_count: site.count,
     existing_account_posts: site.account_posts,
-    idea_guidance: accountConfig.ideaGuidance,
+    idea_guidance: ideaGuidance,
+    idea_source: ideaSelection.idea_source,
+    selected_idea: ideaSelection.selected_idea,
+    fallback_used: ideaSelection.fallback_used,
+    fallback_reason: ideaSelection.fallback_reason,
+    idea_selection: ideaSelection,
     trend_radar: trendRecommendation,
     identity_guidance: accountConfig.identityGuidance,
     performance_context: performanceUpdate.summary || null,
@@ -396,7 +438,11 @@ async function commandPreflight() {
     existing_count: site.count,
     run_dir: runDir,
     insights_update: payload.insights_update,
-    performance_report: payload.performance_report
+    performance_report: payload.performance_report,
+    idea_source: payload.idea_source,
+    trend_concept_id: ideaSelection.trend_concept_id,
+    fallback_used: payload.fallback_used,
+    fallback_reason: payload.fallback_reason
   });
   console.log(JSON.stringify(payload, null, 2));
 }
@@ -1245,6 +1291,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 
 export {
   buildInstagramCarouselPlan,
+  loadRecentIdeaSelectionHistory,
   imageMetadata,
   nextPostId,
   parsePromptsSource,

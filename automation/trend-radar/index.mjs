@@ -1,1 +1,1 @@
-export { getBestTrendForAccount, resolveIdeaWithTrendRadar, runTrendRadar } from "./runner.mjs";
+export { getBestTrendForAccount, prepareResultForAccount, resolveIdeaWithTrendRadar, runTrendRadar } from "./runner.mjs";

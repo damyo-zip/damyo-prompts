@@ -91,3 +91,17 @@ if (result.ok) {
 ```
 
 실제 사용 확정 시에만 `{ recordSelection: true }`를 전달해 선택 이력을 기록합니다. 단순 preflight 추천은 사용한 것으로 기록하지 않습니다.
+
+## Kongi 1단계 실제 선택 연결
+
+`automation/idea-selector.mjs`가 preflight의 아이디어 출처를 결정합니다. 기본값은 OFF이며 다음 설정을 사용합니다.
+
+```text
+TREND_RADAR_ENABLE_SELECTION=false
+TREND_RADAR_SELECTION_ACCOUNTS=kongi
+TREND_RADAR_MIN_EVIDENCE=50
+TREND_RADAR_ALLOW_DECLINING=false
+TREND_RADAR_DUPLICATE_THRESHOLD=0.72
+```
+
+ON 상태에서도 코드상 실제 선택 허용 계정은 `kongi`뿐입니다. publishable, 최소 Evidence, declining 정책과 최근 30개/60일 게시물 의미 중복 검사를 통과한 첫 후보만 `preflight.selected_idea`가 됩니다. 조건 미달이나 오류는 기존 generator로 fallback하며 이미지 생성, validation, caption, Git, Meta 게시 경로에는 관여하지 않습니다.

@@ -29,7 +29,7 @@ npm run trend:evidence
 npm run trend:test
 ```
 
-`preflight` 결과의 `trend_radar.concept`가 현재 계정의 추천 아이디어입니다. v0.2는 실제 source에서 추적되는 `original_trend`와 창의적인 `pet_adaptation`을 분리하고, 독립 출처·7일/30일 최신성·cross-platform·source quality를 검증합니다. weak signal이거나 추천이 없고 collector·분석·캐시도 실패하면 `trend_radar.fallback`이 `true`가 되며, 기존 게시 이력·Insights·`idea_guidance` 흐름은 중단되지 않습니다. 상세 구조는 `automation/trend-radar/README.md`를 참고합니다.
+`preflight` 결과의 `trend_radar.concept`는 현재 계정의 추천 아이디어입니다. `TREND_RADAR_ENABLE_SELECTION=true`이면 1단계 운영 대상인 `kongi`에서만 publishable·Evidence·Momentum·최근 중복 조건을 다시 통과한 최상위 후보가 `selected_idea`와 실제 `idea_guidance`가 됩니다. `hamnimi`는 flag 설정과 무관하게 기존 generator 흐름을 유지합니다. 비활성화·미지원 계정·조건 미달·Radar 오류는 `idea_source: "fallback_generator"`와 원래 `idea_guidance`로 안전하게 복귀합니다. 상세 구조는 `automation/trend-radar/README.md`를 참고합니다.
 
 ## 최초 설정
 
@@ -59,7 +59,7 @@ Insights의 일시적 장애나 일부 미지원 지표는 새 게시를 막지 
 
 ### 2. 콘텐츠 기획과 초안
 
-Codex가 선택된 계정의 `animal` 게시물만 대상으로 `title`, `category`, `description`, `prompt`, `automation/posts/<accountKey>/`의 `idea_category`·`idea_summary`, 해당 계정 Instagram 성과, 최근 중복 여부를 비교하고 후보를 내부 평가한 뒤 하나를 자동 선정합니다. `automation/draft.example.json` 형식으로 `<run_dir>/draft.json`을 만들고 `account_key`를 기록합니다. 후보 평가는 신선도, 생성 성공 가능성, 보호자의 따라하기 욕구, 과거 성과, 중복, 탐색 가치를 함께 봅니다.
+`preflight.idea_source`가 `trend_radar`이면 `selected_idea`를 실제 아이디어 입력으로 사용합니다. `fallback_generator`이면 Codex가 선택된 계정의 `animal` 게시물만 대상으로 `title`, `category`, `description`, `prompt`, `automation/posts/<accountKey>/`의 `idea_category`·`idea_summary`, 해당 계정 Instagram 성과, 최근 중복 여부를 비교하고 후보를 내부 평가한 뒤 하나를 자동 선정합니다. `automation/draft.example.json` 형식으로 `<run_dir>/draft.json`을 만들고 `account_key`를 기록합니다. 후보 평가는 신선도, 생성 성공 가능성, 보호자의 따라하기 욕구, 과거 성과, 중복, 탐색 가치를 함께 봅니다.
 
 햄님이는 작은 체구가 분명히 드러나는 미니어처, 스케일 대비, 사람처럼 행동하는 상황극, 실제 보호자의 스마트폰 스냅 같은 콘텐츠에 가산점을 줍니다. 기존 `animal: "small"` 콘텐츠와 구도·테마·상황·소품이 사실상 같은 아이디어는 피합니다.
 
