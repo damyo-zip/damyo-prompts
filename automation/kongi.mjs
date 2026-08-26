@@ -24,6 +24,7 @@ import {
   savePublishedPostMetadata,
   updateInstagramInsights
 } from "./insights.mjs";
+import { getBestTrendForAccount } from "./trend-radar/index.mjs";
 
 const automationDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = dirname(automationDir);
@@ -346,6 +347,8 @@ async function commandPreflight() {
   const site = summarizeSite(PROMPTS);
   if (site.duplicate_ids.length) throw new Error(`중복 ID가 있습니다: ${site.duplicate_ids.join(", ")}`);
 
+  const trendRecommendation = await getBestTrendForAccount(accountConfig.accountKey);
+
   const previous = await readJson(statePath, null);
   const runId = activeState(previous) ? previous.run_id : `${accountConfig.accountKey}-${localTimestamp()}-${randomSuffix()}`;
   const postId = activeState(previous) ? previous.post_id : site.next_id;
@@ -363,6 +366,7 @@ async function commandPreflight() {
     existing_count: site.count,
     existing_account_posts: site.account_posts,
     idea_guidance: accountConfig.ideaGuidance,
+    trend_radar: trendRecommendation,
     identity_guidance: accountConfig.identityGuidance,
     performance_context: performanceUpdate.summary || null,
     insights_update: {

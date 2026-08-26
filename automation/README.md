@@ -18,6 +18,18 @@
 
 계정별 차이는 `automation/accounts/*.mjs`의 `displayName`, `animal`, reference, `instagramCtaImage`, 아이디어 지침, Instagram 환경변수뿐입니다. ID 계산, 사이트 수정, 검수, Git, 배포 확인, Instagram 게시, Insights, snapshot, rate 계산, 중복 방지는 공통 엔진에 한 번만 구현됩니다.
 
+## Trend Radar 아이디어 입력
+
+`automation/trend-radar/`는 최근 공개 웹의 사진·패션·밈·AI 이미지·광고·여행·향수·반려동물 시각 트렌드를 폭넓게 수집한 뒤 반려동물 버전으로 번역합니다. Instagram Explore는 직접 크롤링하지 않습니다.
+
+```powershell
+npm run trend:dry-run
+npm run trend:refresh
+npm run trend:test
+```
+
+`preflight` 결과의 `trend_radar.concept`가 현재 계정의 추천 아이디어입니다. 추천이 없거나 collector·분석·캐시가 모두 실패하면 `trend_radar.fallback`이 `true`가 되고, 기존 게시 이력·Insights·`idea_guidance`를 사용하는 기획 흐름은 중단되지 않습니다. 캐시 TTL, 데이터 소스, 점수, 중복 방지와 공개 인터페이스는 `automation/trend-radar/README.md`를 참고합니다.
+
 ## 최초 설정
 
 1. `.env.example`을 `.env`로 복사합니다.
